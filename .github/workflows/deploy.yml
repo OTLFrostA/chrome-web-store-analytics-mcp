@@ -1,0 +1,79 @@
+name: Deploy MCP (release tag)
+
+on:
+  push:
+    tags:
+      - 'v*'
+
+permissions:
+  contents: read
+
+concurrency:
+  group: cws-analytics-mcp-production
+  cancel-in-progress: false
+
+jobs:
+  deploy:
+    if: github.repository == 'OTLFrostA/chrome-web-store-analytics'
+    runs-on: ubuntu-latest
+    timeout-minutes: 15
+    environment: production
+    env:
+      CLOUDFLARE_API_TOKEN: ${{ secrets.CLOUDFLARE_API_TOKEN }}
+      CLOUDFLARE_ACCOUNT_ID: ${{ secrets.CLOUDFLARE_ACCOUNT_ID }}
+      WRANGLER_PRODUCTION_CONFIG: ${{ secrets.WRANGLER_PRODUCTION_CONFIG }}
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+          persist-credentials: false
+      - uses: actions/setup-node@v4
+        with:
+          node-version: "22"
+          cache: npm
+      - name: Verify release tag and source
+        shell: bash
+        env:
+          TAG: ${{ github.ref_name }}
+          SOURCE_SHA: ${{ github.sha }}
+        run: |
+          set -euo pipefail
+          if [[ ! "$TAG" =~ ^v([0-9]+\.[0-9]+\.[0-9]+)$ ]]; then
+            echo "::error::Deployment tag must be vX.Y.Z, got $TAG"
+            exit 1
+          fi
+          VERSION="${BASH_REMATCH[1]}"
+          PACKAGE_VERSION=$(node -p 'require("./package.json").version')
+          if [[ "$VERSION" != "$PACKAGE_VERSION" ]]; then
+            echo "::error::Release tag $TAG must match package.json version $PACKAGE_VERSION"
+            exit 1
+          fi
+          if [[ "$(git rev-parse HEAD)" != "$SOURCE_SHA" ]]; then
+            echo "::error::Checked out commit differs from tagged source"
+            exit 1
+          fi
+          git fetch --no-tags origin '+refs/heads/main:refs/remotes/origin/main'
+          if ! git merge-base --is-ancestor "$SOURCE_SHA" origin/main; then
+            echo "::error::Release tag must point to a commit already on main"
+            exit 1
+          fi
+          echo "Verified deployment source: $TAG at $SOURCE_SHA"
+      - run: npm ci
+      - name: Test
+        run: npm test
+      - name: Verify Worker bundle without deployment
+        run: npm run check
+      - name: Validate destination and prepare private production config
+        shell: bash
+        run: |
+          test -n "$CLOUDFLARE_API_TOKEN" || { echo "::error::Missing CLOUDFLARE_API_TOKEN"; exit 1; }
+          test -n "$CLOUDFLARE_ACCOUNT_ID" || { echo "::error::Missing CLOUDFLARE_ACCOUNT_ID"; exit 1; }
+          test -n "$WRANGLER_PRODUCTION_CONFIG" || { echo "::error::Missing WRANGLER_PRODUCTION_CONFIG"; exit 1; }
+          node scripts/mask-production-config.mjs
+          printf '%s\n' "$WRANGLER_PRODUCTION_CONFIG" > wrangler.toml
+          chmod 600 wrangler.toml
+          node scripts/validate-deploy.mjs
+      - name: Deploy Worker
+        run: npm run deploy
+      - name: Smoke test public pages
+        run: node scripts/smoke.mjs

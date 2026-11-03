@@ -1,0 +1,36 @@
+# Copy to wrangler.toml; use YOUR OWN Cloudflare account, Worker URL and resources.
+# wrangler.toml is intentionally ignored by Git.
+name = "your-cws-analytics-mcp"
+main = "src/index.js"
+compatibility_date = "2026-10-31"
+compatibility_flags = ["nodejs_compat", "global_fetch_strictly_public"]
+workers_dev = true
+
+# Fill in your Cloudflare Account ID:
+# account_id = "YOUR_CLOUDFLARE_ACCOUNT_ID"
+
+[vars]
+# Replace with YOUR exact HTTPS MCP endpoint ending in /mcp.
+MCP_RESOURCE = "https://your-cws-analytics-mcp.example.invalid/mcp"
+
+# Create a new KV namespace, then uncomment:
+# [[kv_namespaces]]
+# binding = "OAUTH_KV"
+# id = "YOUR_KV_NAMESPACE_ID"
+
+# Create a new D1 database, then uncomment:
+# [[d1_databases]]
+# binding = "MCP_DB"
+# database_name = "cws_analytics_mcp"
+# database_id = "YOUR_D1_DATABASE_ID"
+
+# Choose an unused positive integer namespace_id in your own account.
+# Separate keys protect Google requests, registration by IP and total
+# registrations. Each key uses this per-location budget.
+[[ratelimits]]
+name = "GOOGLE_API_RATE_LIMITER"
+namespace_id = "1001"
+
+[ratelimits.simple]
+limit = 20
+period = 60
