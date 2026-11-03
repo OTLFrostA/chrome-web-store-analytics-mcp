@@ -1,4 +1,4 @@
-const SOURCE = "https://github.com/OTLFrostA/chrome-web-store-analytics";
+const SOURCE = "https://github.com/OTLFrostA/chrome-web-store-analytics-mcp";
 const ISSUES = SOURCE + "/issues";
 
 function htmlPage(name, body) {

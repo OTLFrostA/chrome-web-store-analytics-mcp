@@ -20,8 +20,8 @@ This repository explains **how to run your own instance**. We are **not publishi
 ### 1. Set up the project
 
 ```sh
-git clone https://github.com/OTLFrostA/chrome-web-store-analytics.git
-cd chrome-web-store-analytics
+git clone https://github.com/OTLFrostA/chrome-web-store-analytics-mcp.git
+cd chrome-web-store-analytics-mcp
 npm ci
 npx wrangler login
 cp wrangler.example.toml wrangler.toml
@@ -147,7 +147,7 @@ Do not commit OAuth secrets, Cloudflare API tokens or your local `wrangler.toml`
 
 ## Support
 
-[Issues and feature requests](https://github.com/OTLFrostA/chrome-web-store-analytics/issues). This is an independent project, not affiliated with Google, Chrome, Cloudflare or OpenAI.
+[Issues and feature requests](https://github.com/OTLFrostA/chrome-web-store-analytics-mcp/issues). This is an independent project, not affiliated with Google, Chrome, Cloudflare or OpenAI.
 
 ## Account safety and revocation
 
