@@ -1,4 +1,4 @@
 Deploy request: 2026-11-03
-Target version: 0.4.0
-Reason: replace SerpAPI with user-owned Bright Data Top-100 async ranking, preserve CWS analytics and D1 history.
+Target version: 0.4.1
+Reason: release unified per-extension keyword management UI and account-scoped pause/resume settings. Preserve existing analytics and ranking history.
 Requested by: repo owner via ChatGPT GitHub integration.
