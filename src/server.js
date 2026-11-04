@@ -434,7 +434,7 @@ function createServer() {
 
   server.registerTool('get_collection_status', {
     title: 'Read scheduled collector configuration and recent runs',
-    description: 'Read daily collectors, keyword configurations, Bright Data usage, official review settings and recent runs.'
+    description: 'Read daily collectors, keyword configurations, Bright Data usage, official review settings and recent runs.',
     inputSchema: { itemId: z.string().optional() },
     annotations: { readOnlyHint: true, destructiveHint: false, openWorldHint: false }, securitySchemes,
   }, async ({ itemId }) => withErrors(async () => {
