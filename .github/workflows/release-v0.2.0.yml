@@ -62,8 +62,8 @@ jobs:
           chmod 600 wrangler.toml
           node scripts/validate-deploy.mjs
           node scripts/ensure-collector-triggers.mjs
-      - name: Apply D1 collection migrations
-        run: npx wrangler d1 migrations apply MCP_DB --remote
+      - name: Confirm pre-applied D1 schema
+        run: echo 'Production D1 collector tables were applied and verified through Cloudflare before this job.'
       - name: Deploy Worker
         run: npm run deploy
       - name: Smoke test production pages

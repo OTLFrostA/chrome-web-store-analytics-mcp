@@ -75,7 +75,8 @@ jobs:
           node scripts/validate-deploy.mjs
       - name: Ensure collector Cron is configured
         run: node scripts/ensure-collector-triggers.mjs
-      - name: Apply D1 collection migrations
+      - name: Apply D1 collection migrations (optional, requires D1 API access)
+        if: vars.ENABLE_D1_MIGRATIONS == 'true'
         run: npx wrangler d1 migrations apply MCP_DB --remote
       - name: Deploy Worker
         run: npm run deploy
