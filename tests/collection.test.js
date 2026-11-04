@@ -79,9 +79,16 @@ test('batch metrics request preserves each metric and per-day dimension', async 
   assert.equal(seen[0].options.headers.Authorization, 'Bearer test-access-token');
 });
 
-test('dispatcher does not query D1 outside registered hours', async () => {
-  const result = await handleCollectionSchedule({ MCP_DB: { prepare() { throw Error('unexpected DB access'); } } }, Date.UTC(2026, 10, 3, 15));
-  assert.equal(result.skipped, true);
+test('hourly dispatcher polls pending Bright Data snapshots outside daily collection hour', async () => {
+  const seen=[];
+  const result=await handleCollectionSchedule({MCP_DB:{prepare(sql){
+    seen.push(sql);
+    assert.match(sql,/FROM collector_runs/);
+    return {bind(){return {async all(){return {results:[]};}};}};
+  }}},Date.UTC(2026,10,3,15));
+  assert.equal(result.skipped,true);
+  assert.deepEqual(result.pending,[]);
+  assert.equal(seen.length,1);
 });
 
 
