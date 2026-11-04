@@ -148,7 +148,6 @@ test('unified private settings UI renders both keyword editors with safe MCP too
   for(const id of ['extension','google-list','webstore-list','google-form','webstore-form']){
     assert.match(BRIGHTDATA_SETTINGS_HTML,new RegExp('id="'+id+'"'));
   }
-  assert.match(BRIGHTDATA_SETTINGS_HTML,/type="checkbox"/);
   assert.match(BRIGHTDATA_SETTINGS_HTML,/toggle\.type="checkbox"/);
   assert.match(BRIGHTDATA_SETTINGS_HTML,/type="password"/);
   assert.match(BRIGHTDATA_SETTINGS_HTML,/textContent/);
