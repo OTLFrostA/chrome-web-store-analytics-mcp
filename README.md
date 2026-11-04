@@ -9,7 +9,7 @@ This repository explains **how to run your own instance**. We are **not publishi
 - Sign in with Google OAuth using `chromewebstore.readonly` (no publishing or editing permissions).
 - Connect extensions using a public Chrome Web Store detail URL and your Publisher ID.
 - Ask an MCP client for recent metrics, with dimensions including country, OS, install source and app version when supported by Google.
-- Keep authorization state in Cloudflare KV and your saved extension associations in D1. Analytics query results are fetched on demand, not saved as a metrics history.
+- Keep authorization state in Cloudflare KV and your saved extension associations in D1. Analytics queries are on demand; optional daily collection stores private metrics and public search ranks in D1.
 
 **You must own or have authorized access to the extension analytics you want to view.** The Chrome Web Store API does not return search-keyword data.
 
@@ -152,7 +152,7 @@ Do not commit OAuth secrets, Cloudflare API tokens or your local `wrangler.toml`
 ## Account safety and revocation
 
 - The Google consent scope is `openid email chromewebstore.readonly`, not extension publishing access.
-- The pinned Cloudflare OAuth Provider v1.2.4 stores issued tokens by hash and AES-GCM-encrypts authorization `props`. D1 stores extension associations, not Google credentials or metric histories.
+- The pinned Cloudflare OAuth Provider v1.2.4 stores issued tokens by hash and AES-GCM-encrypts authorization `props`. D1 stores extension associations and opt-in metrics/ranking histories; the scheduled Google credential is AES-GCM encrypted in KV.
 - The settings panel's **Disconnect Google account** action (or the `disconnect_google_account` MCP tool, invoked only with explicit user approval) revokes upstream Google access, deletes that account's D1 extension links, and revokes MCP grants. Reconnection is required afterward. Google token revocation can also invalidate other grants under the same Google Cloud project.
 - Self-service disconnection checks all existing grants first and declines to proceed when an account has more than eight active grants, rather than risk partial deletion on Workers Free. In that case, revoke access in Google Account settings and request server-side cleanup.
 - Linking and metric queries share a **per-verified-Google-account limit of 20 Google API requests per minute, per Cloudflare location**. Cloudflare's rate limit is approximate, not a global strict quota. Every self-hosting deployment must include the `GOOGLE_API_RATE_LIMITER` binding in its private `wrangler.toml`.
@@ -164,3 +164,18 @@ Do not commit OAuth secrets, Cloudflare API tokens or your local `wrangler.toml`
 - Account-owned D1 statements must always bind the verified Google subject, never an extension or publisher identifier supplied by a client.
 
 Before inviting third-party users, perform a manual two-account test: sign in separately with Google A and Google B, link distinct extensions, then verify neither account can enumerate, query or delete the other's associations. Unit tests use fake users and must never use real Google tokens.
+
+
+## Optional daily data collection (opt-in)
+
+The collector supports Chrome Web Store daily analytics and Chrome Web Store search keyword ranking history, in the same Worker and D1. By default, this feature is OFF for each Google account. Call `enable_daily_collection` once using the connected OAuth session to store an AES-GCM encrypted scheduled refresh credential. Disabling the collector deletes that copy; disconnecting the account deletes its private histories and credential.
+
+Each collector registers an ID, its collection function, and its desired local hour. An hourly UTC Cloudflare Cron invokes only collectors due in the `America/Los_Angeles` timezone; both built-in tasks default to 8:00 AM PT, including DST. Every scheduled task/day/extension is deduplicated. Use `collect_now` for manual reruns or initial data backfill, `set_ranking_keywords` to track up to 20 search phrases, `get_collection_status` to inspect runs and failures, and `get_saved_metrics`/`get_ranking_history` to read historical data.
+
+The analytics collector uses Google's official API, backfills up to 90 complete UTC days on its first successful run, then refreshes a 14-day correction window. The ranking collector uses an **undocumented** Chrome Web Store search RPC that may change without notice. A null rank means the extension was not found among returned results, NOT rank zero.
+
+### Deploy requirements
+
+Keep the existing `MCP_DB` and `OAUTH_KV` bindings and initialize `schema.sql` for a new database. The release-tag GitHub Action applies `migrations/0001_collectors.sql` to the existing D1 before deploying, then ensures the Cron trigger is present. To enable scheduled Google access, configure `SCHEDULE_TOKEN_KEY` as a Worker secret containing a persistent random 32-byte base64 key (for example `openssl rand -base64 32` piped into `wrangler secret put SCHEDULE_TOKEN_KEY`). **Do not commit this key or rotate it without migrating stored credentials.** Verify migrations, secrets, CI, and isolated staging before publishing a production tag.
+
+For safety, `main` pushes do not deploy; production runs only from version tags under the existing release workflow. Do not reuse production KV, D1, or OAuth client secrets when validating new collectors in staging.

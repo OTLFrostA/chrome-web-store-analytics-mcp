@@ -6,6 +6,7 @@ import { publicPage } from "./public-pages.js";
 import { makeCodeVerifier, googleAuthorizeUrl, exchangeCode, fetchGoogleIdentity, googleOAuthUserId } from "./google.js";
 import { oauthOptions, authorizedGoogleIdentity } from "./oauth-options.js";
 import { protectRegistration } from "./registration.js";
+import { handleCollectionSchedule } from "./collection/runner.js";
 
 function consentPage(details, handle) {
   const client = escapeHtml(details.clientName);
@@ -139,5 +140,10 @@ export default {
   fetch(request, bindings, ctx) {
     return protectRegistration(request, bindings.GOOGLE_API_RATE_LIMITER,
       guarded => provider.fetch(guarded, bindings, ctx));
+  },
+  scheduled(controller, bindings, ctx) {
+    ctx.waitUntil(handleCollectionSchedule(bindings, controller.scheduledTime)
+      .then(result => console.log('Scheduled collection completed:', JSON.stringify(result)))
+      .catch(error => console.error('Scheduled collection failed:', error instanceof Error ? error.message : 'unknown')));
   },
 };
