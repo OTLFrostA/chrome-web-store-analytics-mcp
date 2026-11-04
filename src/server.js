@@ -208,7 +208,7 @@ function createServer() {
 
   server.registerTool('get_brightdata_status', {
     title: 'Check private Bright Data configuration',
-    description: 'Return whether a personal Bright Data API key is stored and the account's local monthly keyword-record budget; never return the key.',
+    description: 'Return whether a personal Bright Data API key is stored and the account-wide local monthly keyword-record budget; never return the key.',
     inputSchema: {},
     annotations: { readOnlyHint: true, destructiveHint: false, openWorldHint: false }, securitySchemes,
   }, async () => withErrors(async () => {
