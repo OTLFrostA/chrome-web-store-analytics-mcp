@@ -45,7 +45,8 @@ function serpApiUrl(apiKey, endpoint, params = {}) {
 export async function verifySerpApiKey(apiKey, request = fetch) {
   // Account API does not consume a search credit. Only allowlisted fields are
   // returned: its response includes the plaintext api_key and user email.
-  const response = await request(serpApiUrl(apiKey, '/account.json'), { redirect: 'error' });
+  // Cloudflare Workers supports "manual", not "error". A 3xx is rejected below.
+  const response = await request(serpApiUrl(apiKey, '/account.json'), { redirect: 'manual' });
   if (!response.ok) throw new Error('SerpAPI key verification failed (HTTP ' + response.status + ').');
   let data;
   try { data = await response.json(); } catch { throw new Error('SerpAPI account API returned invalid JSON.'); }
@@ -166,7 +167,8 @@ export async function collectGoogleSearchRankings({
         engine: 'google', q: keyword, gl: 'us', hl: 'en',
         google_domain: 'google.com', device, num: 100,
       });
-      const response = await request(url, { redirect: 'error' });
+      // Never follow redirects to another host with the user's API key in the URL.
+      const response = await request(url, { redirect: 'manual' });
       if (!response.ok) {
         stop = response.status === 429 || response.status === 401 || response.status === 403;
         throw new Error('http_' + response.status);
