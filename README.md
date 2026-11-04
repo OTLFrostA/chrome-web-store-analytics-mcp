@@ -121,6 +121,8 @@ For subsequent tagged releases, bump the version in `package.json` and `package-
 
 Manual runs do not bump the package version or make a GitHub release. Both paths use the same `production` environment and existing Cloudflare secrets; if environment approval is configured, the deployment waits for approval.
 
+**Automation-friendly explicit production deploy:** when the GitHub integration cannot call the Actions Run workflow API, create or update **only** `.github/deploy-requests/production.txt` on `main` in a single commit. The deploy workflow runs on that exact file change, verifies that it is the only changed file and the commit is the current `main`, then follows the same tests, build, secret validation and production environment approval. Ordinary pushes, PR merges without this marker, and edits to other paths do **not** trigger production CD. The commit may specify the reason for the deployment and the target package version; never put credentials in the marker.
+
 The upstream deployment uses three Actions **environment secrets** on `production`:
 
 | Secret | Value |
