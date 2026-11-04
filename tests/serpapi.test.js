@@ -84,9 +84,21 @@ test('SerpAPI Account API verification never returns API key or account email', 
   assert.equal(queried.url.origin,'https://serpapi.com');
   assert.equal(queried.url.pathname,'/account.json');
   assert.equal(queried.url.searchParams.get('api_key'),'example-valid-key-for-testing');
+  assert.deepEqual(queried.options,{redirect:'manual'});
   assert.deepEqual(result,{plan:'Free',searchesPerMonth:200,searchesLeft:74});
   assert.doesNotMatch(JSON.stringify(result),/example-valid|private@example/);
   await assert.rejects(verifySerpApiKey('bad-key',async()=>new Response('no',{status:401})),/HTTP 401/);
+});
+
+test('SerpAPI verification rejects redirects without following secret-bearing requests',async()=>{
+  let calls=0;
+  await assert.rejects(verifySerpApiKey('private-key-for-testing',async(url,options)=>{
+    calls++;
+    assert.equal(new URL(url).hostname,'serpapi.com');
+    assert.deepEqual(options,{redirect:'manual'});
+    return new Response(null,{status:302,headers:{Location:'https://attacker.example/collect'}});
+  }),/HTTP 302/);
+  assert.equal(calls,1);
 });
 
 test('each Google account has its own encrypted SerpAPI key; none is returned in settings',async()=>{
@@ -128,7 +140,8 @@ test('SerpAPI monthly budget and per-keyword day reservations prevent repeat spe
     await setGoogleSearchMonthlyLimit(db,'alice',1);
     const keywords=[{keyword:'my extension',market:'us/en',device:'desktop'},
       {keyword:'another phrase',market:'us/en',device:'desktop'}];
-    const request=async url=>{
+    const request=async (url,options)=>{
+      assert.deepEqual(options,{redirect:'manual'});
       const parsed=new URL(url);calls.push(parsed.searchParams.get('q'));
       assert.equal(parsed.hostname,'serpapi.com');
       assert.equal(parsed.searchParams.get('api_key'),'alice-private-token');
@@ -148,6 +161,28 @@ test('SerpAPI monthly budget and per-keyword day reservations prevent repeat spe
     assert.equal(historic[0].rank,2);
     assert.equal((await getGoogleSearchBudget(db,'alice',now)).requestedThisMonth,1);
     assert.equal((await getGoogleSearchBudget(db,'bob',now)).requestedThisMonth,0);
+  }finally{sqlite.close();}
+});
+
+test('Google rank collector rejects redirects and stores only a redacted HTTP error',async()=>{
+  const {sqlite,db}=mockD1();
+  let calls=0;
+  try{
+    await assert.rejects(collectGoogleSearchRankings({
+      env:{MCP_DB:db},googleSub:'alice',item:{itemId:firstId},now,
+      keywords:[{keyword:'sensitive-term',market:'us/en',device:'desktop'}],
+      apiKey:'private-key-for-testing',
+      request:async(url,options)=>{
+        calls++;
+        assert.equal(new URL(url).hostname,'serpapi.com');
+        assert.deepEqual(options,{redirect:'manual'});
+        return new Response(null,{status:302,headers:{Location:'https://attacker.example/collect'}});
+      },
+    }),/failed for 1 keyword/);
+    assert.equal(calls,1);
+    const saved=await db.prepare('SELECT status,error_code FROM google_search_history WHERE google_sub=?')
+      .bind('alice').all();
+    assert.deepEqual(saved.results,[{status:'error',error_code:'http_302'}]);
   }finally{sqlite.close();}
 });
 
