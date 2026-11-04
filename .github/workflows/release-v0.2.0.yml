@@ -1,0 +1,77 @@
+name: One-time release of CWS MCP v0.2.0
+
+on:
+  push:
+    branches: [main]
+    paths:
+      - '.github/workflows/release-v0.2.0.yml'
+
+permissions:
+  contents: write
+
+concurrency:
+  group: cws-analytics-mcp-production
+  cancel-in-progress: false
+
+jobs:
+  release:
+    if: github.repository == 'OTLFrostA/chrome-web-store-analytics-mcp' && github.event.head_commit.message == 'chore(release): bootstrap v0.2.0 deployment'
+    runs-on: ubuntu-latest
+    timeout-minutes: 20
+    environment: production
+    env:
+      CLOUDFLARE_API_TOKEN: ${{ secrets.CLOUDFLARE_API_TOKEN }}
+      CLOUDFLARE_ACCOUNT_ID: ${{ secrets.CLOUDFLARE_ACCOUNT_ID }}
+      WRANGLER_PRODUCTION_CONFIG: ${{ secrets.WRANGLER_PRODUCTION_CONFIG }}
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+      - uses: actions/setup-node@v4
+        with:
+          node-version: '22'
+          cache: npm
+      - name: Verify one-time release source
+        shell: bash
+        run: |
+          set -euo pipefail
+          test "${{ github.ref }}" = "refs/heads/main"
+          test "${{ github.event.head_commit.message }}" = "chore(release): bootstrap v0.2.0 deployment"
+          test "$(node -p 'require("./package.json").version')" = "0.2.0"
+          test "$(git rev-parse HEAD)" = "${{ github.sha }}"
+          if git show-ref --verify --quiet refs/tags/v0.2.0; then
+            echo "::error::v0.2.0 already exists; refusing duplicate release"
+            exit 1
+          fi
+      - name: Install dependencies
+        run: npm ci
+      - name: Test
+        run: npm test
+      - name: Verify Worker bundle without deployment
+        run: npm run check
+      - name: Validate production configuration
+        shell: bash
+        run: |
+          set -euo pipefail
+          test -n "$CLOUDFLARE_API_TOKEN"
+          test -n "$CLOUDFLARE_ACCOUNT_ID"
+          test -n "$WRANGLER_PRODUCTION_CONFIG"
+          node scripts/mask-production-config.mjs
+          printf '%s\n' "$WRANGLER_PRODUCTION_CONFIG" > wrangler.toml
+          chmod 600 wrangler.toml
+          node scripts/validate-deploy.mjs
+          node scripts/ensure-collector-triggers.mjs
+      - name: Apply D1 collection migrations
+        run: npx wrangler d1 migrations apply MCP_DB --remote
+      - name: Deploy Worker
+        run: npm run deploy
+      - name: Smoke test production pages
+        run: node scripts/smoke.mjs
+      - name: Create release tag after verified deployment
+        shell: bash
+        run: |
+          set -euo pipefail
+          git config user.name 'github-actions[bot]'
+          git config user.email '41898282+github-actions[bot]@users.noreply.github.com'
+          git tag -a v0.2.0 -m 'CWS Analytics MCP v0.2.0 - daily collectors'
+          git push origin refs/tags/v0.2.0
