@@ -16,6 +16,7 @@ import { COLLECTORS, enableDailyCollection, disableDailyCollection, runCollectio
 import { saveBrightDataKey, hasBrightDataKey, deleteBrightDataKey } from "./collection/credentials.js";
 import { verifyBrightDataKey, getGoogleSearchBudget, setGoogleSearchMonthlyLimit, updateGoogleSearchKeywords, listGoogleSearchKeywords, getGoogleSearchHistory } from "./collection/brightdata.js";
 import { BRIGHTDATA_SETTINGS_URI, BRIGHTDATA_SETTINGS_MIME, BRIGHTDATA_SETTINGS_HTML } from "./brightdata-setup-ui.js";
+import { readKeywordSettings, saveKeywordSettings } from "./collection/keyword-settings.js";
 import { saveQueryMetrics, getMetricHistory, getRankingHistory, deleteExtensionHistory } from "./collection/history.js";
 
 const securitySchemes = [{ type: "oauth2", scopes: ["cws:read"] }];
@@ -46,7 +47,7 @@ async function userExtensions(sub) {
 }
 
 function createServer() {
-  const server = new McpServer({ name: "Chrome Web Store Analytics", version: "0.4.0" });
+  const server = new McpServer({ name: "Chrome Web Store Analytics", version: "0.4.1" });
 
   server.registerResource("extension-settings", SETUP_RESOURCE_URI, {
     title: "Chrome Web Store Analytics — Extension Settings",
@@ -66,8 +67,8 @@ function createServer() {
   }));
 
   server.registerResource("brightdata-settings", BRIGHTDATA_SETTINGS_URI, {
-    title: "Your private Bright Data key settings",
-    description: "Configure a private, user-owned Bright Data key for Google Search rank monitoring.",
+    title: "Bright Data and keyword monitoring settings",
+    description: "Manage a private Bright Data key and per-extension Google / Chrome Web Store keyword monitoring.",
     mimeType: BRIGHTDATA_SETTINGS_MIME,
     _meta: { ui: {} },
   }, async () => ({
@@ -81,8 +82,8 @@ function createServer() {
   }));
 
   server.registerTool("open_brightdata_settings", {
-    title: "Manage your private Bright Data key",
-    description: "Open a password-entry settings form to securely configure or remove your personal Bright Data API key. Use this instead of asking the user to paste secrets into chat. Other users never share this key.",
+    title: "Manage Bright Data and ranking keywords",
+    description: "Open the unified private settings form to manage a personal Bright Data key and add, remove, pause or resume Google Search and Chrome Web Store keywords for each linked extension. Never paste API tokens into chat.",
     inputSchema: {},
     annotations: { readOnlyHint: true, destructiveHint: false, openWorldHint: false },
     securitySchemes,
@@ -91,7 +92,22 @@ function createServer() {
   }, async () => withErrors(async () => {
     const props = authProps();
     return result({ configured: await hasBrightDataKey(env, props.googleSub),
-      nextStep: "Use the private form to add, rotate, or remove your Bright Data key." });
+      nextStep: "Use the private form to manage the Bright Data key and both keyword lists for your connected extensions." });
+  }));
+
+  server.registerTool("open_keyword_settings", {
+    title: "Manage Google and Chrome Web Store ranking keywords",
+    description: "Open the unified keyword settings UI to add, remove, pause or resume ranking keywords independently for each linked extension. Includes a private Bright Data key panel.",
+    inputSchema: {},
+    annotations: { readOnlyHint: true, destructiveHint: false, openWorldHint: false },
+    securitySchemes,
+    _meta: { ui: { resourceUri: BRIGHTDATA_SETTINGS_URI },
+      "openai/ui": { entrypoints: [{ type: "global" }] } },
+  }, async () => withErrors(async () => {
+    const props = authProps();
+    const extensions = await userExtensions(props.googleSub);
+    return result({ extensions: extensions.map(item => ({itemId:item.itemId,storeUrl:item.storeUrl})),
+      nextStep: "Use the settings panel to edit either keyword list for a linked extension." });
   }));
 
   server.registerTool("open_extension_settings", {
@@ -227,6 +243,36 @@ function createServer() {
   }, async ({ monthlyLimit }) => withErrors(async () => {
     const props = authProps();
     return result(await setGoogleSearchMonthlyLimit(env.MCP_DB, props.googleSub, monthlyLimit));
+  }));
+
+  server.registerTool('get_keyword_settings', {
+    title: 'Get configured ranking keywords, including paused entries',
+    description: 'Read both Google Search and Chrome Web Store keyword settings (enabled and disabled) for one extension owned by the authenticated Google account. No keys or search history are returned.',
+    inputSchema: { itemId: z.string().optional() },
+    annotations: { readOnlyHint: true, destructiveHint: false, openWorldHint: false }, securitySchemes,
+  }, async ({ itemId }) => withErrors(async () => {
+    const props = authProps();
+    const item = selectUserExtension(await userExtensions(props.googleSub), itemId);
+    return result({ itemId: item.itemId,
+      ...(await readKeywordSettings(env.MCP_DB, props.googleSub, item.itemId)) });
+  }));
+
+  server.registerTool('save_keyword_settings', {
+    title: 'Save ranking keyword monitoring settings',
+    description: 'Replace the selected extension keyword list for Google Search (maximum 100) or Chrome Web Store (maximum 20). Each entry has an explicit enabled flag; disabled entries can be resumed later. Existing ranking history is never deleted.',
+    inputSchema: {
+      itemId: z.string().optional(),
+      engine: z.enum(['google','webstore']),
+      entries: z.array(z.object({
+        keyword: z.string().min(1).max(120), enabled: z.boolean(),
+      })).max(100),
+    },
+    annotations: { readOnlyHint: false, destructiveHint: false, openWorldHint: false }, securitySchemes,
+  }, async ({ itemId, engine, entries }) => withErrors(async () => {
+    const props = authProps();
+    const item = selectUserExtension(await userExtensions(props.googleSub), itemId);
+    const saved = await saveKeywordSettings(env.MCP_DB, props.googleSub, item.itemId, engine, entries);
+    return result({ itemId: item.itemId, engine, entries: saved });
   }));
 
   server.registerTool('set_google_search_keywords', {
