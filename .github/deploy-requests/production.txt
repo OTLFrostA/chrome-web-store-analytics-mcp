@@ -1,4 +1,4 @@
 Deploy request: 2026-11-04
-Target version: 0.5.0
-Reason: publish official Chrome Web Store review collection and account-scoped D1 review history with independent 9 AM scheduled capture. Production D1 migration 0003 has been applied.
+Target version: 0.5.1
+Reason: handle Chrome Web Store fetchReviews orderBy syntax variants and classify HTTP 400 errors without logging private Google responses.
 Requested by: repo owner via ChatGPT GitHub integration.
