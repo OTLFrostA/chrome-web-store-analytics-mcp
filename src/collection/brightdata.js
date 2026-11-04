@@ -8,6 +8,8 @@ const JOB_PREFIX = 'brightdata-job:v1:';
 const DEFAULT_MONTHLY_LIMIT = 200;
 const MAX_KEYWORDS = 100;
 const JOB_TTL_SECONDS = 60 * 60 * 24 * 7;
+// Bright Data now issues both s_* and sd_* dataset snapshot IDs.
+const SNAPSHOT_ID = /^s(?:d)?_[a-zA-Z0-9_-]{5,128}$/;
 
 function nextMonth(month) {
   const [year, m] = month.split('-').map(Number);
@@ -137,6 +139,17 @@ function searchInput({keyword}) {
     start_page:1, end_page:10};
 }
 
+
+export function parseSnapshotId(payload) {
+  const snapshotId = payload?.snapshot_id;
+  if (typeof snapshotId !== 'string') {
+    if (payload?.error || payload?.errors) throw new Error('provider_reported_error');
+    throw new Error('missing_snapshot_id');
+  }
+  if (!SNAPSHOT_ID.test(snapshotId)) throw new Error('invalid_snapshot_id');
+  return snapshotId;
+}
+
 export async function submitBrightDataRankings({
   env, googleSub, item, runId, now = Date.now(), keywords, apiKey, request = fetch,
 }) {
@@ -170,17 +183,14 @@ export async function submitBrightDataRankings({
     if (!response.ok) throw await sanitizedHttpError(response);
     let payload;
     try {payload = await response.json();} catch {throw new Error('invalid_json');}
-    const snapshotId = payload?.snapshot_id;
-    if (typeof snapshotId !== 'string' || !/^s_[a-zA-Z0-9_-]{5,128}$/.test(snapshotId)) {
-      throw new Error('missing_snapshot_id');
-    }
+    const snapshotId = parseSnapshotId(payload);
     // KV stores only the opaque ID and keyword metadata, never the API key.
     await env.OAUTH_KV.put(JOB_PREFIX + runId, JSON.stringify({
       snapshotId,googleSub,itemId:item.itemId,date,keywords:selected,
     }),{expirationTtl:JOB_TTL_SECONDS});
     return {status:'pending',rowsWritten:0,requested:selected.length,skipped,quotaReached};
   } catch (error) {
-    const code = error instanceof Error && /^(http_[0-9]{3}(?:_[a-z_]{3,48})?|invalid_json|missing_snapshot_id)$/.test(error.message)
+    const code = error instanceof Error && /^(http_[0-9]{3}(?:_[a-z_]{3,48})?|invalid_json|missing_snapshot_id|invalid_snapshot_id|provider_reported_error)$/.test(error.message)
       ? error.message : 'request_failed';
     for (const entry of selected) {
       await finishRow(env.MCP_DB,googleSub,item.itemId,date,entry,{status:'error',errorCode:code});
@@ -275,7 +285,7 @@ export async function pollBrightDataRun({env,googleSub,itemId,runId,apiKey,reque
   const job = await env.OAUTH_KV.get(JOB_PREFIX + runId,'json');
   if (!job) return {runId,status:'pending',reason:'Snapshot metadata is not available yet.'};
   if (job.googleSub!==googleSub || job.itemId!==itemId ||
-      !Array.isArray(job.keywords) || !/^s_[a-zA-Z0-9_-]{5,128}$/.test(job.snapshotId)) {
+      !Array.isArray(job.keywords) || !SNAPSHOT_ID.test(job.snapshotId)) {
     throw new Error('Invalid account-bound Bright Data snapshot metadata.');
   }
   const headers = apiHeaders(apiKey);
