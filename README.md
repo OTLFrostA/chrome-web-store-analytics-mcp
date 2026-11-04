@@ -9,7 +9,7 @@ This repository explains **how to run your own instance**. We are **not publishi
 - Sign in with Google OAuth using `chromewebstore.readonly` (no publishing or editing permissions).
 - Connect extensions using a public Chrome Web Store detail URL and your Publisher ID.
 - Ask an MCP client for recent metrics, with dimensions including country, OS, install source and app version when supported by Google.
-- Keep authorization state in Cloudflare KV and your saved extension associations in D1. Analytics queries are on demand; optional daily collection stores private metrics and public search ranks in D1.
+- Keep authorization state in Cloudflare KV and extension associations and historical metrics in D1. Optional daily collection includes Chrome Web Store internal search ranking and Google organic search ranking via each user's own SerpAPI key.
 
 **You must own or have authorized access to the extension analytics you want to view.** The Chrome Web Store API does not return search-keyword data.
 
@@ -102,13 +102,13 @@ If your client doesn't support the interactive settings UI, provide the Store UR
 
 Production deployments use [Deploy MCP (release tag)](.github/workflows/deploy.yml). The **only** deployment trigger is pushing a `vX.Y.Z` tag to GitHub. The release tag must match `package.json` version and point to a commit already in `main`.
 
-To deploy version `0.1.0` (the current `package.json` version), after merging the desired changes into `main`:
+To deploy a release version (for example `0.3.0`), after merging the desired changes into `main`:
 
 ```sh
 git checkout main
 git pull --ff-only
-git tag v0.1.0
-git push origin v0.1.0
+git tag v0.3.0
+git push origin v0.3.0
 ```
 
 For subsequent releases, bump the version in `package.json` and `package-lock.json`, commit it to `main`, then tag and push the corresponding `vX.Y.Z`. You can also create a new version tag in the GitHub Releases interface. The GitHub Actions workflow verifies the tag format, matching package version, source commit ancestry, tests and build **before** deploying the exact tagged commit. The `production` environment can additionally require approval.
@@ -141,7 +141,7 @@ Choose a unique rate-limit namespace within your Cloudflare account. The predepl
 
 ## Privacy and security
 
-This app stores per-user Google OAuth grants/refresh tokens in Cloudflare KV, and stores the linked Google account identifier, extension ID, Publisher ID and Store URL in Cloudflare D1. It does **not** store the history of metrics returned by the Chrome Web Store API. Cloudflare and your MCP client may retain operational logs and/or conversation history.
+This app stores per-user Google OAuth grants/refresh tokens in Cloudflare KV, and stores account-scoped extension settings and opt-in metrics/ranking history in Cloudflare D1. Optional user-provided SerpAPI keys are AES-GCM encrypted and stored in KV, never in D1 or source control. Cloudflare and your MCP client may retain operational logs and/or conversation history.
 
 Do not commit OAuth secrets, Cloudflare API tokens or your local `wrangler.toml`. Review the privacy policy, Google OAuth consent settings, security controls and data-retention implications before allowing third-party users to connect to your instance.
 
@@ -168,16 +168,29 @@ Before inviting third-party users, perform a manual two-account test: sign in se
 
 ## Optional daily data collection (opt-in)
 
-The collector supports Chrome Web Store daily analytics and Chrome Web Store search keyword ranking history, in the same Worker and D1. By default, this feature is OFF for each Google account. Call `enable_daily_collection` once using the connected OAuth session to store an AES-GCM encrypted scheduled refresh credential. Disabling the collector deletes that copy; disconnecting the account deletes its private histories and credential.
+The collector supports Chrome Web Store daily analytics, Chrome Web Store internal keyword rankings, and optional Google organic rankings (user-owned SerpAPI account), all in the same Worker and D1. By default, this feature is OFF for each Google account. Call `enable_daily_collection` once using the connected OAuth session to store an AES-GCM encrypted scheduled refresh credential. Disabling the collector deletes that copy; disconnecting the account deletes its private histories and credential.
 
-Each collector registers an ID, its collection function, and its desired local hour. An hourly UTC Cloudflare Cron invokes only collectors due in the `America/Los_Angeles` timezone; both built-in tasks default to 8:00 AM PT, including DST. Every scheduled task/day/extension is deduplicated. Use `collect_now` for manual reruns or initial data backfill, `set_ranking_keywords` to track up to 20 search phrases, `get_collection_status` to inspect runs and failures, and `get_saved_metrics`/`get_ranking_history` to read historical data.
+Each collector registers an ID, its collection function, and its desired local hour. An hourly UTC Cloudflare Cron invokes only collectors due in the `America/Los_Angeles` timezone; all three built-in tasks default to 8:00 AM PT, including DST. Every scheduled task/day/extension is deduplicated. Use `collect_now` for manual reruns or initial data backfill, `set_ranking_keywords` to track up to 20 search phrases, `get_collection_status` to inspect runs and failures, and `get_saved_metrics`/`get_ranking_history` to read historical data.
 
 Ranking keywords are **runtime data in D1**, scoped by the authorized Google account and the linked extension. There are no hard-coded or shared default search phrases. Use `set_ranking_keywords` with 1–20 phrases to configure a specific extension; send an empty array (`keywords: []`) to clear its tracking. With no configured keywords, ranking collection is skipped without error or a recorded run, while analytics continues normally. Previously saved ranking history is retained.
 
-The analytics collector uses Google's official API, backfills up to 90 complete UTC days on its first successful run, then refreshes a 14-day correction window. The ranking collector uses an **undocumented** Chrome Web Store search RPC that may change without notice. A null rank means the extension was not found among returned results, NOT rank zero.
+### Optional Google organic search rankings (SerpAPI BYOK)
+
+Google Search rankings are a **separate** task from Chrome Web Store internal search rankings. Users must explicitly configure their own SerpAPI credential and per-extension keywords. The app owner supplies **no shared SerpAPI token or Gemini-specific default keywords**.
+
+1. Use `open_serpapi_settings` to open a private password-entry form and add your personal SerpAPI API key. The server verifies it against SerpAPI's quota-free Account API before encrypting it with the existing `SCHEDULE_TOKEN_KEY` and saving it under your Google subject in KV. The key is never returned. Never paste keys into a public issue or chat.
+2. Call `set_google_search_keywords` with the target extension and up to 20 Google organic search queries. An empty array turns Google keyword monitoring off for that extension without deleting its history.
+3. `get_serpapi_status` reports whether **your** key exists and tracks your request count. `set_serpapi_monthly_limit` changes your account-level monthly request cap (default 200); all linked extensions share that cap. Always choose a cap that fits your own SerpAPI plan. This protective counter resets by Pacific calendar month and may differ from SerpAPI's billing cycle.
+4. `collect_now` with `taskId: "google-search-ranking"` queries on demand; `get_google_search_history` reads results. Scheduled collection runs at 8:00 AM PT only if your key, keywords, and daily collection subscription are configured.
+
+Each search keyword/date/account/extension is reserved in D1 before the external API request. Retriggering the same day does not spend more requests. Failed requests are stored with redacted status codes; a `not_found` result means only that the Web Store listing was absent from returned Google organic results. The Worker does not return plaintext SerpAPI keys, provider account emails or complete provider responses. If your Key is missing, the Google Search task skips cleanly; Analytics and internal store ranking still run.
+
+`remove_serpapi_key` deletes your encrypted key but retains search history. `disconnect_google_account` deletes it alongside account-scoped histories. Cloudflare Worker secrets cannot be extracted in plaintext: anyone migrating from a legacy shared Worker secret must enter their own SerpAPI key once in the new UI.
+
+The analytics collector uses Google's official API, backfills up to 90 complete UTC days on its first successful run, then refreshes a 14-day correction window. The Chrome Web Store ranking collector uses an **undocumented** Chrome Web Store search RPC that may change without notice. A null rank means the extension was not found among returned results, NOT rank zero.
 
 ### Deploy requirements
 
-Keep the existing `MCP_DB` and `OAUTH_KV` bindings and initialize `schema.sql` for a new database. Apply `migrations/0001_collectors.sql` to the existing D1 using an authorized Cloudflare account before deploying. The tag release workflow configures the hourly Cron trigger; it runs D1 migrations automatically only when the GitHub repository/environment variable `ENABLE_D1_MIGRATIONS` is set to `true` and its Cloudflare API token has D1 permissions. The initial v0.2.0 production schema was pre-applied through Cloudflare. This keeps the least-privilege Worker deployment token usable. To enable scheduled Google access, configure `SCHEDULE_TOKEN_KEY` as a Worker secret containing a persistent random 32-byte base64 key (for example `openssl rand -base64 32` piped into `wrangler secret put SCHEDULE_TOKEN_KEY`). **Do not commit this key or rotate it without migrating stored credentials.** Verify migrations, secrets, CI, and isolated staging before publishing a production tag.
+Keep the existing `MCP_DB` and `OAUTH_KV` bindings and initialize `schema.sql` for a new database. Apply `migrations/0001_collectors.sql` and then `migrations/0002_google_search.sql` to the existing D1 using an authorized Cloudflare account before deploying. The tag release workflow configures the hourly Cron trigger; it runs D1 migrations automatically only when the GitHub repository/environment variable `ENABLE_D1_MIGRATIONS` is set to `true` and its Cloudflare API token has D1 permissions. The initial v0.2.0 production schema was pre-applied through Cloudflare. This keeps the least-privilege Worker deployment token usable. To enable scheduled Google access, configure `SCHEDULE_TOKEN_KEY` as a Worker secret containing a persistent random 32-byte base64 key (for example `openssl rand -base64 32` piped into `wrangler secret put SCHEDULE_TOKEN_KEY`). **Do not commit this key or rotate it without migrating stored credentials; it also protects per-user SerpAPI keys.** Verify migrations, secrets, CI, and isolated staging before publishing a production tag.
 
 For safety, `main` pushes do not deploy; production runs only from version tags under the existing release workflow. Do not reuse production KV, D1, or OAuth client secrets when validating new collectors in staging.

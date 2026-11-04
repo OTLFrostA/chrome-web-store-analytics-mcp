@@ -31,10 +31,11 @@ export function publicPage(pathname) {
     "<p>Connect your Google account through ChatGPT, add your public Chrome Web Store extension URL and Publisher ID, " +
     "then ask ChatGPT about installs, uninstalls, active users, impressions, page views, and available breakdowns.</p>" +
     "<p>We query Google on demand; enabling daily collection also saves account-scoped metric and ranking history in D1. " +
+    "Google organic search ranking is optional and uses a key you provide to SerpAPI. " +
     "Your ChatGPT conversation may include returned statistics.</p>" +
     '<p><a href="/privacy">Privacy details</a> · <a href="' + SOURCE + '">Open-source repository</a></p>');
   if (pathname === "/privacy") return htmlPage("Privacy Policy",
-    "<h1>Privacy Policy</h1><p><small>Effective November 1, 2026</small></p>" +
+    "<h1>Privacy Policy</h1><p><small>Updated November 4, 2026</small></p>" +
     "<h2>Data we process</h2>" +
     "<p>Chrome Web Store Analytics obtains your Google account stable ID, verified email, and OAuth authorization " +
     "with read-only Chrome Web Store analytics scope. The Google ID, selected Publisher ID, extension ID, and public " +
@@ -46,15 +47,27 @@ export function publicPage(pathname) {
     "Enabling daily collection also stores a separately encrypted Google refresh credential in Cloudflare KV, " +
     "used only for background analytics retrieval. Private metrics are not shared with other accounts. " +
     "The connected client may save returned statistics in chat history under its own policies.</p>" +
+    "<h2>Optional Google Search ranking and SerpAPI</h2>" +
+    "<p>Google organic search ranking via SerpAPI is opt-in. Each user supplies their own API key " +
+    "in a private settings form. We verify it against SerpAPI's Account API and store it encrypted " +
+    "with AES-GCM in Cloudflare KV under your Google account identity. No key is kept in D1 or " +
+    "shared with other users. Google Search phrases, per-user request budgets and ranking history " +
+    "are stored in account- and extension-scoped D1 records. SerpAPI receives your key and search " +
+    "queries when searches are performed. Your SerpAPI account controls billing and quotas; " +
+    "the service adds a conservative configurable monthly request limit and daily deduplication. " +
+    "You can remove the key separately while retaining historical ranks. No ranking search runs " +
+    "without your key and configured phrases.</p>" +
     "<h2>Service providers and logs</h2>" +
-    "<p>Google supplies analytics and OAuth identity information. Cloudflare hosts the Worker, database, OAuth " +
+    "<p>Google supplies analytics and OAuth identity information. SerpAPI processes optional " +
+    "organic search queries and personal API key verification. Cloudflare hosts the Worker, database, OAuth " +
     "storage, and operational logs. These logs may contain request metadata, timestamps, error categories, and " +
     "HTTP statuses. We do not intentionally log OAuth credentials or full analytics responses. " +
     "We do not sell your data or use it for ads.</p>" +
     "<h2>Controls</h2>" +
     "<p>You can disable daily collection at any time to remove the scheduled credential. Stored history " +
     "remains until you remove an extension or disconnect your Google account. " +
-    "You can remove individual extensions in the settings panel. The Disconnect Google account action " +
+    "You can remove individual extensions or your optional SerpAPI key in settings. " +
+    "The Disconnect Google account action " +
     "revokes upstream authorization, deletes all your linked extensions, and revokes your MCP sessions. " +
     "Google revocation may invalidate other authorizations associated with the same Google Cloud project. " +
     "You can also revoke access through your Google Account, or disconnect the plugin in ChatGPT. " +
@@ -67,7 +80,8 @@ export function publicPage(pathname) {
     "Chrome Web Store extension analytics. Do not attempt to access data you are not authorized to view.</p>" +
     "<h2>Service limitations</h2><p>Metrics come from Google's API and may be delayed, incomplete, or unavailable. " +
     "We cannot guarantee accuracy or uptime, and may update, suspend, or discontinue the MVP. " +
-    "No publishing or extension editing functionality is provided.</p>" +
+    "Optional SerpAPI searches use each user's own API key and quota. No publishing or extension " +
+    "editing functionality is provided.</p>" +
     "<h2>Disclaimer</h2><p>This independent project is not endorsed by Google or OpenAI. " +
     "It is provided as-is without warranties to the extent permitted by applicable law. " +
     "You can disconnect and revoke authorization at any time.</p>" +

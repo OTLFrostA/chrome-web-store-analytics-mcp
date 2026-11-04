@@ -1,6 +1,6 @@
 import { googleOAuthUserId, revokeGoogleRefreshToken } from "./google.js";
 import { deleteAccountHistory } from './collection/history.js';
-import { deleteCollectorCredential } from './collection/credentials.js';
+import { deleteCollectorCredential, deleteSerpApiKey } from './collection/credentials.js';
 
 // Keep self-service deletion within the Workers Free subrequest budget.
 // Accounts with unusually many OAuth grants require resumable cleanup.
@@ -37,6 +37,7 @@ export async function disconnectGoogleAccount({
     try {
       await deleteAccountHistory(db, googleSub);
       await deleteCollectorCredential(collectionEnv, googleSub);
+      await deleteSerpApiKey(collectionEnv, googleSub);
     } catch {
       collectorCleanupFailed = true;
     }

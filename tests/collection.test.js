@@ -19,7 +19,7 @@ test('scheduled 8am Pacific is DST-safe', () => {
   assert.equal(isMorningCollectionTime(Date.UTC(2026, 6, 3, 16)), false);
   assert.equal(localDay(Date.UTC(2026, 10, 4, 3)), '2026-11-03');
   assert.equal(localHour(Date.UTC(2026, 10, 3, 16)), 8);
-  assert.deepEqual(dueCollectorIds(Date.UTC(2026, 10, 3, 16)), ['cws-analytics', 'cws-ranking']);
+  assert.deepEqual(dueCollectorIds(Date.UTC(2026, 10, 3, 16)), ['cws-analytics', 'cws-ranking', 'google-search-ranking']);
   assert.deepEqual(dueCollectorIds(Date.UTC(2026, 10, 3, 15)), []);
 });
 

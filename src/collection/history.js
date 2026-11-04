@@ -65,6 +65,8 @@ export async function deleteExtensionHistory(db, googleSub, itemId) {
     db.prepare('DELETE FROM metric_history WHERE google_sub=? AND item_id=?').bind(googleSub, itemId),
     db.prepare('DELETE FROM ranking_history WHERE google_sub=? AND item_id=?').bind(googleSub, itemId),
     db.prepare('DELETE FROM collector_keywords WHERE google_sub=? AND item_id=?').bind(googleSub, itemId),
+    db.prepare('DELETE FROM google_search_keywords WHERE google_sub=? AND item_id=?').bind(googleSub, itemId),
+    db.prepare('DELETE FROM google_search_history WHERE google_sub=? AND item_id=?').bind(googleSub, itemId),
     db.prepare('DELETE FROM collector_runs WHERE google_sub=? AND item_id=?').bind(googleSub, itemId),
   ]);
 }
@@ -74,6 +76,9 @@ export async function deleteAccountHistory(db, googleSub) {
     db.prepare('DELETE FROM metric_history WHERE google_sub=?').bind(googleSub),
     db.prepare('DELETE FROM ranking_history WHERE google_sub=?').bind(googleSub),
     db.prepare('DELETE FROM collector_keywords WHERE google_sub=?').bind(googleSub),
+    db.prepare('DELETE FROM google_search_keywords WHERE google_sub=?').bind(googleSub),
+    db.prepare('DELETE FROM google_search_history WHERE google_sub=?').bind(googleSub),
+    db.prepare('DELETE FROM google_search_settings WHERE google_sub=?').bind(googleSub),
     db.prepare('DELETE FROM collector_runs WHERE google_sub=?').bind(googleSub),
     db.prepare('DELETE FROM collector_subscriptions WHERE google_sub=?').bind(googleSub),
   ]);

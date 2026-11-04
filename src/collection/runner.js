@@ -2,7 +2,8 @@ import { listUserExtensions } from '../storage.js';
 import { collectMetrics } from './metrics.js';
 import { searchWebStore } from './ranking.js';
 import { saveRankingHistory } from './history.js';
-import { readCollectorCredential, saveCollectorCredential, deleteCollectorCredential } from './credentials.js';
+import { readCollectorCredential, saveCollectorCredential, deleteCollectorCredential, hasSerpApiKey, readSerpApiKey } from './credentials.js';
+import { collectGoogleSearchRankings, listGoogleSearchKeywords } from './serpapi.js';
 import { localDay, localHour } from './time.js';
 
 async function listRankingKeywords(db, googleSub, itemId) {
@@ -24,6 +25,7 @@ async function collectRankings({ env, googleSub, item, now, keywords }) {
 export const COLLECTORS = Object.freeze({
   'cws-analytics': { id: 'cws-analytics', schedule: { hourPT: 8 }, collect: collectMetrics },
   'cws-ranking': { id: 'cws-ranking', schedule: { hourPT: 8 }, collect: collectRankings },
+  'google-search-ranking': { id: 'google-search-ranking', schedule: { hourPT: 8 }, collect: collectGoogleSearchRankings },
 });
 
 export async function updateKeywords(db, googleSub, itemId, keywords) {
@@ -66,6 +68,14 @@ export async function runOneCollector({ env, googleSub, item, taskId, trigger = 
   if (taskId === 'cws-ranking' && keywords.length === 0) {
     return { taskId, skipped: true, reason: 'No ranking keywords configured.' };
   }
+  const googleKeywords = taskId === 'google-search-ranking'
+    ? await listGoogleSearchKeywords(env.MCP_DB, googleSub, item.itemId) : undefined;
+  if (taskId === 'google-search-ranking' && googleKeywords.length === 0) {
+    return { taskId, skipped: true, reason: 'No Google Search keywords configured.' };
+  }
+  if (taskId === 'google-search-ranking' && !(await hasSerpApiKey(env, googleSub))) {
+    return { taskId, skipped: true, reason: 'No user-owned SerpAPI key configured.' };
+  }
   const date = localDay(now), runId = crypto.randomUUID();
   const claim = await env.MCP_DB.prepare(`INSERT OR IGNORE INTO collector_runs
     (run_id, google_sub, item_id, task_id, date, trigger_kind, status)
@@ -74,7 +84,11 @@ export async function runOneCollector({ env, googleSub, item, taskId, trigger = 
   try {
     const credential = taskId === 'cws-analytics'
       ? (refreshToken || await readCollectorCredential(env, googleSub)) : undefined;
-    const result = await collector.collect({ env, googleSub, item, now, refreshToken: credential, keywords });
+    const apiKey = taskId === 'google-search-ranking' ? await readSerpApiKey(env, googleSub) : undefined;
+    const result = await collector.collect({
+      env, googleSub, item, now, refreshToken: credential,
+      keywords: taskId === 'google-search-ranking' ? googleKeywords : keywords, apiKey,
+    });
     await env.MCP_DB.prepare(`UPDATE collector_runs SET status='succeeded', rows_written=?,
       finished_at=CURRENT_TIMESTAMP WHERE run_id=?`).bind(result.rowsWritten, runId).run();
     return { taskId, runId, status: 'succeeded', ...result };
