@@ -2,6 +2,7 @@ import { listUserExtensions } from '../storage.js';
 import { collectMetrics } from './metrics.js';
 import { searchWebStore } from './ranking.js';
 import { saveRankingHistory } from './history.js';
+import { collectReviews, getReviewSettings } from './reviews.js';
 import { readCollectorCredential, saveCollectorCredential, deleteCollectorCredential, hasBrightDataKey, readBrightDataKey } from './credentials.js';
 import { submitBrightDataRankings, pollBrightDataRun, listGoogleSearchKeywords } from './brightdata.js';
 import { localDay, localHour } from './time.js';
@@ -26,6 +27,8 @@ export const COLLECTORS = Object.freeze({
   'cws-analytics': { id: 'cws-analytics', schedule: { hourPT: 8 }, collect: collectMetrics },
   'cws-ranking': { id: 'cws-ranking', schedule: { hourPT: 8 }, collect: collectRankings },
   'google-search-ranking': { id: 'google-search-ranking', schedule: { hourPT: 8 }, collect: submitBrightDataRankings },
+  // Offset review polling so it does not contend with the 8 AM analytics API quota.
+  'cws-reviews': { id: 'cws-reviews', schedule: { hourPT: 9 }, collect: collectReviews },
 });
 
 export async function updateKeywords(db, googleSub, itemId, keywords) {
@@ -76,13 +79,16 @@ export async function runOneCollector({ env, googleSub, item, taskId, trigger = 
   if (taskId === 'google-search-ranking' && !(await hasBrightDataKey(env, googleSub))) {
     return { taskId, skipped: true, reason: 'No user-owned Bright Data key configured.' };
   }
+  if (taskId === 'cws-reviews' && !(await getReviewSettings(env.MCP_DB, googleSub, item.itemId)).enabled) {
+    return { taskId, skipped: true, reason: 'Review collection is disabled for this extension.' };
+  }
   const date = localDay(now), runId = crypto.randomUUID();
   const claim = await env.MCP_DB.prepare(`INSERT OR IGNORE INTO collector_runs
     (run_id, google_sub, item_id, task_id, date, trigger_kind, status)
     VALUES (?, ?, ?, ?, ?, ?, 'running')`).bind(runId, googleSub, item.itemId, taskId, date, trigger).run();
   if ((claim.meta?.changes ?? 0) === 0) return { taskId, skipped: true, reason: 'Already scheduled today.' };
   try {
-    const credential = taskId === 'cws-analytics'
+    const credential = ['cws-analytics', 'cws-reviews'].includes(taskId)
       ? (refreshToken || await readCollectorCredential(env, googleSub)) : undefined;
     const apiKey = taskId === 'google-search-ranking' ? await readBrightDataKey(env, googleSub) : undefined;
     const result = await collector.collect({
