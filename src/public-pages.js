@@ -30,7 +30,7 @@ export function publicPage(pathname) {
     "<p>Explore your Chrome extension statistics in ChatGPT with a read-only Google connection.</p>" +
     "<p>Connect your Google account through ChatGPT, add your public Chrome Web Store extension URL and Publisher ID, " +
     "then ask ChatGPT about installs, uninstalls, active users, impressions, page views, and available breakdowns.</p>" +
-    "<p>We query Google on demand and do not store your analytics results in an analytics warehouse. " +
+    "<p>We query Google on demand; enabling daily collection also saves account-scoped metric and ranking history in D1. " +
     "Your ChatGPT conversation may include returned statistics.</p>" +
     '<p><a href="/privacy">Privacy details</a> · <a href="' + SOURCE + '">Open-source repository</a></p>');
   if (pathname === "/privacy") return htmlPage("Privacy Policy",
@@ -41,16 +41,20 @@ export function publicPage(pathname) {
     "extension URL are saved in a Cloudflare D1 database. OAuth grants and refresh tokens are held in protected " +
     "Cloudflare KV through the OAuth provider. Our service does not request permission to publish or edit extensions.</p>" +
     "<h2>Use of analytics</h2>" +
-    "<p>We request Chrome Web Store metrics from Google only in response to an authorized query, and return the " +
-    "results to your ChatGPT or MCP client. We do not persist these metric results in our MCP database. " +
-    "The connected client may save them in chat history under its own policies.</p>" +
+    "<p>We return on-demand metrics to your authenticated MCP client. If you enable daily collection, " +
+    "the service stores daily Chrome Web Store metrics and public search ranking history in account-scoped D1 records. " +
+    "Enabling daily collection also stores a separately encrypted Google refresh credential in Cloudflare KV, " +
+    "used only for background analytics retrieval. Private metrics are not shared with other accounts. " +
+    "The connected client may save returned statistics in chat history under its own policies.</p>" +
     "<h2>Service providers and logs</h2>" +
     "<p>Google supplies analytics and OAuth identity information. Cloudflare hosts the Worker, database, OAuth " +
     "storage, and operational logs. These logs may contain request metadata, timestamps, error categories, and " +
     "HTTP statuses. We do not intentionally log OAuth credentials or full analytics responses. " +
     "We do not sell your data or use it for ads.</p>" +
     "<h2>Controls</h2>" +
-    "<p>You can remove individual extensions in the settings panel. The Disconnect Google account action " +
+    "<p>You can disable daily collection at any time to remove the scheduled credential. Stored history " +
+    "remains until you remove an extension or disconnect your Google account. " +
+    "You can remove individual extensions in the settings panel. The Disconnect Google account action " +
     "revokes upstream authorization, deletes all your linked extensions, and revokes your MCP sessions. " +
     "Google revocation may invalidate other authorizations associated with the same Google Cloud project. " +
     "You can also revoke access through your Google Account, or disconnect the plugin in ChatGPT. " +

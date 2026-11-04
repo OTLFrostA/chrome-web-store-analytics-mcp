@@ -12,6 +12,8 @@ import { queryMetrics, DIMENSIONS } from "./query.js";
 import { refreshGoogleAccessToken } from "./google.js";
 import { METRICS } from "./metrics.js";
 import { SETUP_RESOURCE_URI, SETUP_MIME_TYPE, SETUP_HTML } from "./setup-ui.js";
+import { COLLECTORS, enableDailyCollection, disableDailyCollection, runCollection, updateKeywords } from "./collection/runner.js";
+import { saveQueryMetrics, getMetricHistory, getRankingHistory, deleteExtensionHistory } from "./collection/history.js";
 
 const securitySchemes = [{ type: "oauth2", scopes: ["cws:read"] }];
 
@@ -142,7 +144,105 @@ function createServer() {
     const chosen = selectUserExtension(extensions, itemId);
     const request = googleFetch(env.GOOGLE_API_RATE_LIMITER, props.googleSub);
     const token = await refreshGoogleAccessToken(env, props.googleRefreshToken, request);
-    return result(await queryMetrics(token, chosen.publisherId, chosen.itemId, metric, dimension, days, request));
+    const data = await queryMetrics(token, chosen.publisherId, chosen.itemId, metric, dimension, days, request);
+    const subscription = await env.MCP_DB.prepare('SELECT enabled FROM collector_subscriptions WHERE google_sub=?')
+      .bind(props.googleSub).first();
+    if (subscription?.enabled) await saveQueryMetrics(env.MCP_DB, props.googleSub, data);
+    return result(data);
+  }));
+
+  server.registerTool('enable_daily_collection', {
+    title: 'Enable 8 AM Pacific collection',
+    description: 'Opt in to a daily 8:00 AM Pacific collection of CWS analytics and public Chrome Web Store keyword rankings. Stores an additional AES-GCM encrypted Google refresh token for scheduled use. No new Google sign-in is needed. Historical metrics and rankings are saved in D1 until you delete them or disconnect.',
+    inputSchema: {},
+    annotations: { readOnlyHint: false, destructiveHint: false, openWorldHint: true }, securitySchemes,
+  }, async () => withErrors(async () => {
+    const props = authProps();
+    if (!(await userExtensions(props.googleSub)).length) throw new Error('Connect at least one extension first.');
+    return result(await enableDailyCollection(env, props.googleSub, props.googleRefreshToken));
+  }));
+
+  server.registerTool('disable_daily_collection', {
+    title: 'Disable scheduled collection',
+    description: 'Stop future daily collection and erase the separate scheduled Google credential. Stored history remains until the extension or account is removed.',
+    inputSchema: {},
+    annotations: { readOnlyHint: false, destructiveHint: false, openWorldHint: false }, securitySchemes,
+  }, async () => withErrors(async () => {
+    const props = authProps();
+    return result(await disableDailyCollection(env, props.googleSub));
+  }));
+
+  server.registerTool('collect_now', {
+    title: 'Collect CWS metrics or keyword rankings now',
+    description: 'On-demand refresh using the authenticated Google account. Choose all tasks or one registered collector. Writes results to D1.',
+    inputSchema: {
+      itemId: z.string().optional(),
+      taskId: z.enum(['all', ...Object.keys(COLLECTORS)]).default('all'),
+    },
+    annotations: { readOnlyHint: false, destructiveHint: false, openWorldHint: true }, securitySchemes,
+  }, async ({ itemId, taskId }) => withErrors(async () => {
+    const props = authProps();
+    const item = selectUserExtension(await userExtensions(props.googleSub), itemId);
+    const tasks = taskId === 'all' ? Object.keys(COLLECTORS) : [taskId];
+    return result({ itemId: item.itemId, runs: await runCollection({
+      env, googleSub: props.googleSub, item, tasks, refreshToken: props.googleRefreshToken,
+    }) });
+  }));
+
+  server.registerTool('set_ranking_keywords', {
+    title: 'Set Chrome Web Store search keywords',
+    description: 'Replace the tracked CWS search keywords (1 to 20) for an extension. Locale is currently en-US.',
+    inputSchema: { itemId: z.string().optional(), keywords: z.array(z.string().min(1).max(120)).min(1).max(20) },
+    annotations: { readOnlyHint: false, destructiveHint: false, openWorldHint: false }, securitySchemes,
+  }, async ({ itemId, keywords }) => withErrors(async () => {
+    const props = authProps();
+    const item = selectUserExtension(await userExtensions(props.googleSub), itemId);
+    return result({ itemId: item.itemId, keywords: await updateKeywords(env.MCP_DB, props.googleSub, item.itemId, keywords) });
+  }));
+
+  server.registerTool('get_saved_metrics', {
+    title: 'Read saved Chrome Web Store analytics history',
+    description: 'Query stored metric history scoped to the authenticated Google account.',
+    inputSchema: {
+      itemId: z.string().optional(), metric: z.enum(METRICS),
+      dimension: z.enum(DIMENSIONS).default('overall'), days: z.number().int().min(1).max(365).default(30),
+    },
+    annotations: { readOnlyHint: true, destructiveHint: false, openWorldHint: false }, securitySchemes,
+  }, async ({ itemId, metric, dimension, days }) => withErrors(async () => {
+    const props = authProps();
+    const item = selectUserExtension(await userExtensions(props.googleSub), itemId);
+    return result({ itemId: item.itemId, rows: await getMetricHistory(env.MCP_DB, props.googleSub, item.itemId, metric, dimension, days) });
+  }));
+
+  server.registerTool('get_ranking_history', {
+    title: 'Read saved CWS search keyword ranks',
+    description: 'Return Chrome Web Store ranking history for a linked extension, including missing ranks outside the inspected top results.',
+    inputSchema: { itemId: z.string().optional(), days: z.number().int().min(1).max(365).default(30) },
+    annotations: { readOnlyHint: true, destructiveHint: false, openWorldHint: false }, securitySchemes,
+  }, async ({ itemId, days }) => withErrors(async () => {
+    const props = authProps();
+    const item = selectUserExtension(await userExtensions(props.googleSub), itemId);
+    return result({ itemId: item.itemId, rows: await getRankingHistory(env.MCP_DB, props.googleSub, item.itemId, days) });
+  }));
+
+  server.registerTool('get_collection_status', {
+    title: 'Read scheduled collector configuration and recent runs',
+    description: 'Show whether daily collection is enabled, configured keywords, and the last 30 task executions.',
+    inputSchema: { itemId: z.string().optional() },
+    annotations: { readOnlyHint: true, destructiveHint: false, openWorldHint: false }, securitySchemes,
+  }, async ({ itemId }) => withErrors(async () => {
+    const props = authProps();
+    const item = selectUserExtension(await userExtensions(props.googleSub), itemId);
+    const [subscription, runs, keywords] = await Promise.all([
+      env.MCP_DB.prepare('SELECT enabled, updated_at AS updatedAt FROM collector_subscriptions WHERE google_sub=?')
+        .bind(props.googleSub).first(),
+      env.MCP_DB.prepare('SELECT run_id AS runId, task_id AS taskId, date, trigger_kind AS trigger, status, rows_written AS rowsWritten, error_message AS error, started_at AS startedAt FROM collector_runs WHERE google_sub=? AND item_id=? ORDER BY started_at DESC LIMIT 30')
+        .bind(props.googleSub, item.itemId).all(),
+      env.MCP_DB.prepare('SELECT keyword, locale FROM collector_keywords WHERE google_sub=? AND item_id=? ORDER BY keyword')
+        .bind(props.googleSub, item.itemId).all(),
+    ]);
+    return result({ itemId: item.itemId, enabled: !!subscription?.enabled, time: '08:00 America/Los_Angeles',
+      collectors: Object.keys(COLLECTORS), keywords: keywords.results ?? [], runs: runs.results ?? [] });
   }));
 
   server.registerTool("remove_extension", {
@@ -153,7 +253,9 @@ function createServer() {
     securitySchemes,
   }, async ({ itemId }) => withErrors(async () => {
     const props = authProps();
-    return result({ removed: await removeUserExtension(env.MCP_DB, props.googleSub, itemId) });
+    const linked = selectUserExtension(await userExtensions(props.googleSub), itemId);
+    await deleteExtensionHistory(env.MCP_DB, props.googleSub, linked.itemId);
+    return result({ removed: await removeUserExtension(env.MCP_DB, props.googleSub, linked.itemId) });
   }));
 
   server.registerTool("disconnect_google_account", {
@@ -173,6 +275,7 @@ function createServer() {
       googleRefreshToken: props.googleRefreshToken,
       db: env.MCP_DB,
       oauth,
+      collectionEnv: env,
     }));
   }));
 

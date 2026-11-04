@@ -9,6 +9,10 @@ workers_dev = true
 # Fill in your Cloudflare Account ID:
 # account_id = "YOUR_CLOUDFLARE_ACCOUNT_ID"
 
+[triggers]
+# Hourly UTC dispatch; individual jobs choose their Pacific collection hour.
+crons = ["0 * * * *"]
+
 [vars]
 # Replace with YOUR exact HTTPS MCP endpoint ending in /mcp.
 MCP_RESOURCE = "https://your-cws-analytics-mcp.example.invalid/mcp"

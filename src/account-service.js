@@ -1,11 +1,13 @@
 import { googleOAuthUserId, revokeGoogleRefreshToken } from "./google.js";
+import { deleteAccountHistory } from './collection/history.js';
+import { deleteCollectorCredential } from './collection/credentials.js';
 
 // Keep self-service deletion within the Workers Free subrequest budget.
 // Accounts with unusually many OAuth grants require resumable cleanup.
 const MAX_GRANTS_PER_DISCONNECT = 8;
 
 export async function disconnectGoogleAccount({
-  googleSub, googleRefreshToken, db, oauth, revokeGoogleToken = revokeGoogleRefreshToken,
+  googleSub, googleRefreshToken, db, oauth, collectionEnv, revokeGoogleToken = revokeGoogleRefreshToken,
 }) {
   const userId = googleOAuthUserId(googleSub);
   const grants = await oauth.listUserGrants(userId, { limit: MAX_GRANTS_PER_DISCONNECT });
@@ -30,6 +32,15 @@ export async function disconnectGoogleAccount({
     // D1 outages must never prevent attempts to revoke the remaining sessions.
     databaseDeletionFailed = true;
   }
+  let collectorCleanupFailed = false;
+  if (collectionEnv) {
+    try {
+      await deleteAccountHistory(db, googleSub);
+      await deleteCollectorCredential(collectionEnv, googleSub);
+    } catch {
+      collectorCleanupFailed = true;
+    }
+  }
   let failedGrantRevocations = 0;
   for (const grant of grants.items) {
     try {
@@ -38,9 +49,10 @@ export async function disconnectGoogleAccount({
       failedGrantRevocations++;
     }
   }
-  if (databaseDeletionFailed || failedGrantRevocations) {
+  if (databaseDeletionFailed || failedGrantRevocations || collectorCleanupFailed) {
     const failures = [
       ...(databaseDeletionFailed ? ["saved extension data could not be deleted"] : []),
+      ...(collectorCleanupFailed ? ["saved collection history or its credential could not be deleted"] : []),
       ...(failedGrantRevocations ? ["some MCP sessions could not be deleted"] : []),
     ];
     throw new Error("Google authorization was revoked, but " + failures.join(" and ") + ". Contact support for cleanup.");
