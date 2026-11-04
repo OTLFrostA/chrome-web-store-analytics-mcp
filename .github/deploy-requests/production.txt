@@ -1,4 +1,4 @@
-Deploy request: 2026-11-03
-Target version: 0.4.1
-Reason: release unified per-extension keyword management UI and account-scoped pause/resume settings. Preserve existing analytics and ranking history.
+Deploy request: 2026-11-04
+Target version: 0.4.2
+Reason: publish redacted Bright Data HTTP 400 diagnostic classification to safely investigate the initial ranking collection failure.
 Requested by: repo owner via ChatGPT GitHub integration.
