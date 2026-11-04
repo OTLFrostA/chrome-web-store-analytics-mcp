@@ -1,7 +1,7 @@
 import test from 'node:test';
 import assert from 'node:assert/strict';
 import { localDay, localHour, isMorningCollectionTime } from '../src/collection/time.js';
-import { dueCollectorIds, handleCollectionSchedule } from '../src/collection/runner.js';
+import { dueCollectorIds, handleCollectionSchedule, runOneCollector, updateKeywords } from '../src/collection/runner.js';
 import { parseSearchResults, searchWebStore } from '../src/collection/ranking.js';
 import { saveCollectorCredential, readCollectorCredential, deleteCollectorCredential } from '../src/collection/credentials.js';
 
@@ -82,4 +82,41 @@ test('batch metrics request preserves each metric and per-day dimension', async 
 test('dispatcher does not query D1 outside registered hours', async () => {
   const result = await handleCollectionSchedule({ MCP_DB: { prepare() { throw Error('unexpected DB access'); } } }, Date.UTC(2026, 10, 3, 15));
   assert.equal(result.skipped, true);
+});
+
+
+test('ranking has no shared defaults: an unconfigured extension is skipped without writing a run', async () => {
+  const queries = [];
+  const env = { MCP_DB: { prepare(sql) {
+    assert.match(sql, /SELECT keyword, locale FROM collector_keywords/);
+    return { bind(googleSub, itemId) {
+      queries.push({ googleSub, itemId });
+      return { async all() { return { results: [] }; } };
+    } };
+  } } };
+  const result = await runOneCollector({
+    env, googleSub: 'new-user', item: { itemId: secondId }, taskId: 'cws-ranking',
+  });
+  assert.deepEqual(result, {
+    taskId: 'cws-ranking', skipped: true, reason: 'No ranking keywords configured.',
+  });
+  assert.deepEqual(queries, [{ googleSub: 'new-user', itemId: secondId }]);
+});
+
+test('keyword configuration is replaced or cleared per Google account and extension', async () => {
+  const batches = [];
+  const db = {
+    prepare(sql) { return { bind(...params) { return { sql, params }; } }; },
+    async batch(statements) { batches.push(statements); },
+  };
+  assert.deepEqual(await updateKeywords(db, 'alice', firstId,
+    [' Gemini Exporter ', 'gemini exporter', 'another keyword']),
+    ['gemini exporter', 'another keyword']);
+  assert.deepEqual(batches[0][0].params, ['alice', firstId]);
+  assert.equal(batches[0].length, 3);
+  assert.deepEqual(await updateKeywords(db, 'bob', secondId, []), []);
+  assert.equal(batches[1].length, 1);
+  assert.match(batches[1][0].sql, /DELETE FROM collector_keywords/);
+  assert.deepEqual(batches[1][0].params, ['bob', secondId]);
+  await assert.rejects(updateKeywords(db, 'alice', firstId, ['  ']), /non-empty keywords/);
 });
