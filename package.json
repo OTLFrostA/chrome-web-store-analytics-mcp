@@ -4,7 +4,7 @@
   "version": "0.5.0",
   "type": "module",
   "scripts": {
-    "test": "node --test",
+    "test": "node --check src/server.js && node --test",
     "check": "wrangler deploy --dry-run --config wrangler.example.toml --outdir dist",
     "predeploy": "node scripts/validate-deploy.mjs",
     "deploy": "wrangler deploy",
