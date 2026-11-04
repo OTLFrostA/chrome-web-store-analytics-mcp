@@ -10,7 +10,7 @@ import {
   verifyBrightDataKey,isTargetStoreUrl,findGoogleStoreRank,
   updateGoogleSearchKeywords,listGoogleSearchKeywords,
   getGoogleSearchBudget,setGoogleSearchMonthlyLimit,
-  submitBrightDataRankings,pollBrightDataRun,parseBrightDataSnapshot,getGoogleSearchHistory,sanitizedHttpError,
+  submitBrightDataRankings,pollBrightDataRun,parseBrightDataSnapshot,getGoogleSearchHistory,sanitizedHttpError,parseSnapshotId,
 } from '../src/collection/brightdata.js';
 
 const firstId = 'ldpbiafkgjlaooeplkiooljccpalpkgf';
@@ -265,3 +265,27 @@ test('Bright Data 400 diagnostic classifies input and permissions without exposi
   assert.equal((await sanitizedHttpError(new Response(null,{status:302}))).message,'http_302');
 });
 
+
+test('trigger parser supports modern sd_ snapshots as well as s_ IDs and rejects untrusted values',()=>{
+  assert.equal(parseSnapshotId({snapshot_id:'sd_msl80v7l1ti14rhcd6'}),'sd_msl80v7l1ti14rhcd6');
+  assert.equal(parseSnapshotId({snapshot_id:'s_m4x7enmven8djfqak'}),'s_m4x7enmven8djfqak');
+  assert.throws(()=>parseSnapshotId({snapshot_id:'https://evil.example/'}),/invalid_snapshot_id/);
+  assert.throws(()=>parseSnapshotId({snapshot_id:'../private'}),/invalid_snapshot_id/);
+  assert.throws(()=>parseSnapshotId({error:'private vendor message'}),/provider_reported_error/);
+  assert.throws(()=>parseSnapshotId({data:[]}),/missing_snapshot_id/);
+});
+
+test('async trigger accepts sd_ snapshot ID, with account-bound metadata for subsequent polling',async()=>{
+  const {sqlite,db}=mockD1(),kv=mockKV();
+  try {
+    const run=await submitBrightDataRankings({
+      env:{MCP_DB:db,OAUTH_KV:kv},googleSub:'alice',item:{itemId:firstId},
+      now,runId:'sd-trigger',apiKey:key,keywords:[{keyword:'provider test'}],
+      request:async()=>Response.json({snapshot_id:'sd_msl80v7l1ti14rhcd6'}),
+    });
+    assert.equal(run.status,'pending');
+    assert.equal(run.requested,1);
+    const metadata=JSON.parse(kv.values.get('brightdata-job:v1:sd-trigger'));
+    assert.equal(metadata.snapshotId,'sd_msl80v7l1ti14rhcd6');
+  } finally {sqlite.close();}
+});
