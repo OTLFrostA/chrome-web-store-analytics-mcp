@@ -256,7 +256,7 @@ function createServer() {
 
   server.registerTool('enable_daily_collection', {
     title: 'Enable 8 AM Pacific collection',
-    description: 'Opt in to daily 8:00 AM Pacific collection of CWS analytics, internal Web Store ranking, and optional Google Search ranking with a personal SerpAPI key. Stores an AES-GCM encrypted Google refresh token for scheduled Analytics use. Historical data stays in D1 until deleted.'
+    description: 'Opt in to daily 8:00 AM Pacific collection of CWS analytics, internal Web Store ranking, and optional Google Search ranking with a personal SerpAPI key. Stores an AES-GCM encrypted Google refresh token for scheduled Analytics use. Historical data stays in D1 until deleted.',
     inputSchema: {},
     annotations: { readOnlyHint: false, destructiveHint: false, openWorldHint: true }, securitySchemes,
   }, async () => withErrors(async () => {
