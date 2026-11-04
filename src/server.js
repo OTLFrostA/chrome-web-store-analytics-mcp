@@ -17,6 +17,7 @@ import { saveBrightDataKey, hasBrightDataKey, deleteBrightDataKey } from "./coll
 import { verifyBrightDataKey, getGoogleSearchBudget, setGoogleSearchMonthlyLimit, updateGoogleSearchKeywords, listGoogleSearchKeywords, getGoogleSearchHistory } from "./collection/brightdata.js";
 import { BRIGHTDATA_SETTINGS_URI, BRIGHTDATA_SETTINGS_MIME, BRIGHTDATA_SETTINGS_HTML } from "./brightdata-setup-ui.js";
 import { readKeywordSettings, saveKeywordSettings } from "./collection/keyword-settings.js";
+import { getReviewSettings, setReviewSettings, getSavedReviews } from "./collection/reviews.js";
 import { saveQueryMetrics, getMetricHistory, getRankingHistory, deleteExtensionHistory } from "./collection/history.js";
 
 const securitySchemes = [{ type: "oauth2", scopes: ["cws:read"] }];
@@ -47,7 +48,7 @@ async function userExtensions(sub) {
 }
 
 function createServer() {
-  const server = new McpServer({ name: "Chrome Web Store Analytics", version: "0.4.1" });
+  const server = new McpServer({ name: "Chrome Web Store Analytics", version: "0.5.0" });
 
   server.registerResource("extension-settings", SETUP_RESOURCE_URI, {
     title: "Chrome Web Store Analytics — Extension Settings",
@@ -301,8 +302,8 @@ function createServer() {
   }));
 
   server.registerTool('enable_daily_collection', {
-    title: 'Enable 8 AM Pacific collection',
-    description: 'Opt in to daily 8:00 AM Pacific collection of CWS analytics, internal Web Store ranking, and optional Google Search ranking with a personal Bright Data key. It submits asynchronous Top-100 snapshots; results are saved when snapshot polling completes. Stores an AES-GCM encrypted Google refresh token for scheduled Analytics use. Historical data stays in D1 until deleted.',
+    title: 'Enable daily collection',
+    description: 'Opt in to 8 AM Pacific CWS analytics/keyword monitoring and 9 AM official Chrome Web Store review monitoring. Uses your encrypted scheduled Google OAuth credential and optional per-user Bright Data key. Disabling preserves history.',
     inputSchema: {},
     annotations: { readOnlyHint: false, destructiveHint: false, openWorldHint: true }, securitySchemes,
   }, async () => withErrors(async () => {
@@ -322,8 +323,8 @@ function createServer() {
   }));
 
   server.registerTool('collect_now', {
-    title: 'Collect CWS metrics or keyword rankings now',
-    description: 'Run one or all collectors on demand: cws-analytics, cws-ranking (Chrome Web Store search), or google-search-ranking (Bright Data organic Google results, requires a personal key and configured keywords). Google ranking runs are submitted asynchronously and saved to D1 when ready.',
+    title: 'Collect CWS metrics, reviews or rankings now',
+    description: 'Run one or all collectors on demand: cws-analytics, cws-ranking, google-search-ranking or cws-reviews (official Google API). Google Search submits asynchronous Bright Data jobs; reviews are deduplicated in D1.',
     inputSchema: {
       itemId: z.string().optional(),
       taskId: z.enum(['all', ...Object.keys(COLLECTORS)]).default('all'),
@@ -362,6 +363,50 @@ function createServer() {
     return result({ itemId: item.itemId, keywords: await updateKeywords(env.MCP_DB, props.googleSub, item.itemId, keywords) });
   }));
 
+  server.registerTool('get_review_collection_settings', {
+    title: 'Read per-extension Web Store review collection settings',
+    description: 'Read whether official Chrome Web Store review collection is enabled and how many newest-first pages are checked per run. Default: enabled, up to five pages of 200 reviews.',
+    inputSchema: { itemId: z.string().optional() },
+    annotations: { readOnlyHint: true, destructiveHint: false, openWorldHint: false }, securitySchemes,
+  }, async ({ itemId }) => withErrors(async () => {
+    const props = authProps();
+    const item = selectUserExtension(await userExtensions(props.googleSub), itemId);
+    return result({ itemId: item.itemId,
+      ...(await getReviewSettings(env.MCP_DB, props.googleSub, item.itemId)) });
+  }));
+
+  server.registerTool('set_review_collection_settings', {
+    title: 'Configure per-extension Web Store review collection',
+    description: 'Enable or disable official CWS review collection and set the number of newest-first pages (1-10, up to 200 reviews each) per run. Account- and extension-scoped D1 settings; disabled review collection retains its history.',
+    inputSchema: {
+      itemId: z.string().optional(),
+      enabled: z.boolean().optional(),
+      maxPages: z.number().int().min(1).max(10).optional(),
+    },
+    annotations: { readOnlyHint: false, destructiveHint: false, openWorldHint: false }, securitySchemes,
+  }, async ({ itemId, enabled, maxPages }) => withErrors(async () => {
+    const props = authProps();
+    const item = selectUserExtension(await userExtensions(props.googleSub), itemId);
+    return result({ itemId: item.itemId,
+      ...(await setReviewSettings(env.MCP_DB, props.googleSub, item.itemId, {enabled,maxPages})) });
+  }));
+
+  server.registerTool('get_saved_reviews', {
+    title: 'Read saved Chrome Web Store user reviews',
+    description: 'Read reviews from D1, without new requests to Google. Includes rating, comment, author display name, review ID, publication and first-seen times. Filter for first-seen dates to discover newly collected reviews. Account/extension-scoped.',
+    inputSchema: {
+      itemId: z.string().optional(),
+      limit: z.number().int().min(1).max(200).default(100),
+      newWithinDays: z.number().int().min(0).max(365).default(0),
+    },
+    annotations: { readOnlyHint: true, destructiveHint: false, openWorldHint: false }, securitySchemes,
+  }, async ({ itemId, limit, newWithinDays }) => withErrors(async () => {
+    const props = authProps();
+    const item = selectUserExtension(await userExtensions(props.googleSub), itemId);
+    return result({ itemId: item.itemId,
+      reviews: await getSavedReviews(env.MCP_DB, props.googleSub, item.itemId, {limit,newWithinDays}) });
+  }));
+
   server.registerTool('get_saved_metrics', {
     title: 'Read saved Chrome Web Store analytics history',
     description: 'Query stored metric history scoped to the authenticated Google account.',
@@ -389,13 +434,13 @@ function createServer() {
 
   server.registerTool('get_collection_status', {
     title: 'Read scheduled collector configuration and recent runs',
-    description: 'Show daily collection status, separate Chrome Web Store and Google Search keyword configurations, private Bright Data key presence, local monthly budget and last 30 task runs.',
+    description: 'Read daily collectors, keyword configurations, Bright Data usage, official review settings and recent runs.'
     inputSchema: { itemId: z.string().optional() },
     annotations: { readOnlyHint: true, destructiveHint: false, openWorldHint: false }, securitySchemes,
   }, async ({ itemId }) => withErrors(async () => {
     const props = authProps();
     const item = selectUserExtension(await userExtensions(props.googleSub), itemId);
-    const [subscription, runs, keywords, googleKeywords, brightDataConfigured, budget] = await Promise.all([
+    const [subscription, runs, keywords, googleKeywords, brightDataConfigured, budget, reviewSettings, reviewCount] = await Promise.all([
       env.MCP_DB.prepare('SELECT enabled, updated_at AS updatedAt FROM collector_subscriptions WHERE google_sub=?')
         .bind(props.googleSub).first(),
       env.MCP_DB.prepare('SELECT run_id AS runId, task_id AS taskId, date, trigger_kind AS trigger, status, rows_written AS rowsWritten, error_message AS error, started_at AS startedAt FROM collector_runs WHERE google_sub=? AND item_id=? ORDER BY started_at DESC LIMIT 30')
@@ -405,9 +450,13 @@ function createServer() {
       listGoogleSearchKeywords(env.MCP_DB, props.googleSub, item.itemId),
       hasBrightDataKey(env, props.googleSub),
       getGoogleSearchBudget(env.MCP_DB, props.googleSub),
+      getReviewSettings(env.MCP_DB, props.googleSub, item.itemId),
+      env.MCP_DB.prepare('SELECT COUNT(*) AS count FROM review_history WHERE google_sub=? AND item_id=?')
+        .bind(props.googleSub, item.itemId).first(),
     ]);
     return result({ itemId: item.itemId, enabled: !!subscription?.enabled, time: '08:00 America/Los_Angeles',
-      collectors: Object.keys(COLLECTORS), keywords: keywords.results ?? [],
+      collectors: Object.keys(COLLECTORS), reviewTime: '09:00 America/Los_Angeles',
+      reviewCollection: { ...reviewSettings, storedCount: reviewCount?.count ?? 0 }, keywords: keywords.results ?? [],
       googleSearchKeywords: googleKeywords, brightDataConfigured, brightDataBudget: budget,
       runs: runs.results ?? [] });
   }));
