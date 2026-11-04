@@ -1,9 +1,10 @@
-name: Deploy MCP (release tag)
+name: Deploy MCP (release tag or manual)
 
 on:
   push:
     tags:
       - 'v*'
+  workflow_dispatch:
 
 permissions:
   contents: read
@@ -31,33 +32,48 @@ jobs:
         with:
           node-version: "22"
           cache: npm
-      - name: Verify release tag and source
+      - name: Verify production deployment source
         shell: bash
         env:
           TAG: ${{ github.ref_name }}
           SOURCE_SHA: ${{ github.sha }}
         run: |
           set -euo pipefail
-          if [[ ! "$TAG" =~ ^v([0-9]+\.[0-9]+\.[0-9]+)$ ]]; then
-            echo "::error::Deployment tag must be vX.Y.Z, got $TAG"
-            exit 1
-          fi
-          VERSION="${BASH_REMATCH[1]}"
-          PACKAGE_VERSION=$(node -p 'require("./package.json").version')
-          if [[ "$VERSION" != "$PACKAGE_VERSION" ]]; then
-            echo "::error::Release tag $TAG must match package.json version $PACKAGE_VERSION"
-            exit 1
-          fi
           if [[ "$(git rev-parse HEAD)" != "$SOURCE_SHA" ]]; then
-            echo "::error::Checked out commit differs from tagged source"
+            echo "::error::Checked out commit differs from requested source"
             exit 1
           fi
           git fetch --no-tags origin '+refs/heads/main:refs/remotes/origin/main'
-          if ! git merge-base --is-ancestor "$SOURCE_SHA" origin/main; then
-            echo "::error::Release tag must point to a commit already on main"
+          if [[ "$GITHUB_EVENT_NAME" == "workflow_dispatch" ]]; then
+            if [[ "$GITHUB_REF" != "refs/heads/main" ]]; then
+              echo "::error::Manual production deployment must select the main branch"
+              exit 1
+            fi
+            if [[ "$SOURCE_SHA" != "$(git rev-parse origin/main)" ]]; then
+              echo "::error::Manual production deployment must use the current main commit"
+              exit 1
+            fi
+            echo "Verified manual production deployment: main at $SOURCE_SHA"
+          elif [[ "$GITHUB_EVENT_NAME" == "push" ]]; then
+            if [[ ! "$TAG" =~ ^v([0-9]+\.[0-9]+\.[0-9]+)$ ]]; then
+              echo "::error::Deployment tag must be vX.Y.Z, got $TAG"
+              exit 1
+            fi
+            VERSION="${BASH_REMATCH[1]}"
+            PACKAGE_VERSION=$(node -p 'require("./package.json").version')
+            if [[ "$VERSION" != "$PACKAGE_VERSION" ]]; then
+              echo "::error::Release tag $TAG must match package.json version $PACKAGE_VERSION"
+              exit 1
+            fi
+            if ! git merge-base --is-ancestor "$SOURCE_SHA" origin/main; then
+              echo "::error::Release tag must point to a commit already on main"
+              exit 1
+            fi
+            echo "Verified tagged production deployment: $TAG at $SOURCE_SHA"
+          else
+            echo "::error::Unsupported production deployment event: $GITHUB_EVENT_NAME"
             exit 1
           fi
-          echo "Verified deployment source: $TAG at $SOURCE_SHA"
       - run: npm ci
       - name: Test
         run: npm test
