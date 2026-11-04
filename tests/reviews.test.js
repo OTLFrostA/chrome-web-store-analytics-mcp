@@ -84,7 +84,7 @@ test('config is scoped per account and extension; disable does not delete saved 
       {enabled:true,maxPages:2});
     assert.deepEqual(await getReviewSettings(db,'bob',itemId),{enabled:true,maxPages:5});
     assert.deepEqual(await getReviewSettings(db,'alice','other'),{enabled:true,maxPages:5});
-    assert.rejects(setReviewSettings(db,'alice',itemId,{maxPages:11}),/page limit/);
+    await assert.rejects(setReviewSettings(db,'alice',itemId,{maxPages:11}),/page limit/);
     const result=await saveReviewPage(db,'alice',itemId,[
       normalizeReview(first(),publisherId,itemId),
     ]);
