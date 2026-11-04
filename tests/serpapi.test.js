@@ -182,7 +182,7 @@ test('Google rank collector rejects redirects and stores only a redacted HTTP er
     assert.equal(calls,1);
     const saved=await db.prepare('SELECT status,error_code FROM google_search_history WHERE google_sub=?')
       .bind('alice').all();
-    assert.deepEqual(saved.results,[{status:'error',error_code:'http_302'}]);
+    assert.deepEqual(saved.results.map(row=>({...row})),[{status:'error',error_code:'http_302'}]);
   }finally{sqlite.close();}
 });
 
