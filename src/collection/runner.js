@@ -1,14 +1,17 @@
 import { listUserExtensions } from '../storage.js';
 import { collectMetrics } from './metrics.js';
-import { DEFAULT_KEYWORDS, searchWebStore } from './ranking.js';
+import { searchWebStore } from './ranking.js';
 import { saveRankingHistory } from './history.js';
 import { readCollectorCredential, saveCollectorCredential, deleteCollectorCredential } from './credentials.js';
 import { localDay, localHour } from './time.js';
 
-async function collectRankings({ env, googleSub, item, now }) {
-  const { results } = await env.MCP_DB.prepare(`SELECT keyword, locale FROM collector_keywords
-    WHERE google_sub=? AND item_id=? AND enabled=1 ORDER BY keyword`).bind(googleSub, item.itemId).all();
-  const keywords = results?.length ? results : DEFAULT_KEYWORDS.map(keyword => ({ keyword, locale: 'en-US' }));
+async function listRankingKeywords(db, googleSub, itemId) {
+  const { results } = await db.prepare(`SELECT keyword, locale FROM collector_keywords
+    WHERE google_sub=? AND item_id=? AND enabled=1 ORDER BY keyword`).bind(googleSub, itemId).all();
+  return results ?? [];
+}
+
+async function collectRankings({ env, googleSub, item, now, keywords }) {
   const rankings = [];
   for (const { keyword, locale } of keywords) {
     const found = await searchWebStore(keyword, locale);
@@ -24,9 +27,9 @@ export const COLLECTORS = Object.freeze({
 });
 
 export async function updateKeywords(db, googleSub, itemId, keywords) {
-  if (!Array.isArray(keywords) || keywords.length === 0 || keywords.length > 20 ||
+  if (!Array.isArray(keywords) || keywords.length > 20 ||
       keywords.some(x => typeof x !== 'string' || !x.trim() || x.length > 120)) {
-    throw new Error('Specify between 1 and 20 non-empty keywords (max 120 characters each).');
+    throw new Error('Specify between 0 and 20 non-empty keywords (max 120 characters each).');
   }
   const normalized = [...new Set(keywords.map(x => x.trim().toLowerCase()))];
   await db.batch([
@@ -56,6 +59,13 @@ export async function disableDailyCollection(env, googleSub) {
 export async function runOneCollector({ env, googleSub, item, taskId, trigger = 'manual', now = Date.now(), refreshToken }) {
   const collector = COLLECTORS[taskId];
   if (!collector) throw new Error('Unknown collection task: ' + taskId);
+  // An extension with no configured keywords has no ranking work to run.
+  // Check before inserting a run so a later configuration can still collect today.
+  const keywords = taskId === 'cws-ranking'
+    ? await listRankingKeywords(env.MCP_DB, googleSub, item.itemId) : undefined;
+  if (taskId === 'cws-ranking' && keywords.length === 0) {
+    return { taskId, skipped: true, reason: 'No ranking keywords configured.' };
+  }
   const date = localDay(now), runId = crypto.randomUUID();
   const claim = await env.MCP_DB.prepare(`INSERT OR IGNORE INTO collector_runs
     (run_id, google_sub, item_id, task_id, date, trigger_kind, status)
@@ -64,7 +74,7 @@ export async function runOneCollector({ env, googleSub, item, taskId, trigger = 
   try {
     const credential = taskId === 'cws-analytics'
       ? (refreshToken || await readCollectorCredential(env, googleSub)) : undefined;
-    const result = await collector.collect({ env, googleSub, item, now, refreshToken: credential });
+    const result = await collector.collect({ env, googleSub, item, now, refreshToken: credential, keywords });
     await env.MCP_DB.prepare(`UPDATE collector_runs SET status='succeeded', rows_written=?,
       finished_at=CURRENT_TIMESTAMP WHERE run_id=?`).bind(result.rowsWritten, runId).run();
     return { taskId, runId, status: 'succeeded', ...result };

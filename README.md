@@ -172,6 +172,8 @@ The collector supports Chrome Web Store daily analytics and Chrome Web Store sea
 
 Each collector registers an ID, its collection function, and its desired local hour. An hourly UTC Cloudflare Cron invokes only collectors due in the `America/Los_Angeles` timezone; both built-in tasks default to 8:00 AM PT, including DST. Every scheduled task/day/extension is deduplicated. Use `collect_now` for manual reruns or initial data backfill, `set_ranking_keywords` to track up to 20 search phrases, `get_collection_status` to inspect runs and failures, and `get_saved_metrics`/`get_ranking_history` to read historical data.
 
+Ranking keywords are **runtime data in D1**, scoped by the authorized Google account and the linked extension. There are no hard-coded or shared default search phrases. Use `set_ranking_keywords` with 1–20 phrases to configure a specific extension; send an empty array (`keywords: []`) to clear its tracking. With no configured keywords, ranking collection is skipped without error or a recorded run, while analytics continues normally. Previously saved ranking history is retained.
+
 The analytics collector uses Google's official API, backfills up to 90 complete UTC days on its first successful run, then refreshes a 14-day correction window. The ranking collector uses an **undocumented** Chrome Web Store search RPC that may change without notice. A null rank means the extension was not found among returned results, NOT rank zero.
 
 ### Deploy requirements

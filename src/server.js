@@ -191,8 +191,8 @@ function createServer() {
 
   server.registerTool('set_ranking_keywords', {
     title: 'Set Chrome Web Store search keywords',
-    description: 'Replace the tracked CWS search keywords (1 to 20) for an extension. Locale is currently en-US.',
-    inputSchema: { itemId: z.string().optional(), keywords: z.array(z.string().min(1).max(120)).min(1).max(20) },
+    description: 'Replace the tracked CWS search keywords (0 to 20) for this extension only. Keywords are stored in D1 per Google account and extension; passing [] clears the list and stops ranking collection until configured again. Analytics collection is unaffected. Locale is currently en-US.',
+    inputSchema: { itemId: z.string().optional(), keywords: z.array(z.string().min(1).max(120)).max(20) },
     annotations: { readOnlyHint: false, destructiveHint: false, openWorldHint: false }, securitySchemes,
   }, async ({ itemId, keywords }) => withErrors(async () => {
     const props = authProps();
