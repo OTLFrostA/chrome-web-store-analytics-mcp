@@ -98,9 +98,9 @@ If your client doesn't support the interactive settings UI, provide the Store UR
 
 ## CI/CD
 
-**CI runs automatically; production deployment requires a version tag.** Pull requests and pushes to `main` trigger [MCP CI](.github/workflows/ci.yml), which runs tests and a Wrangler dry-run build. Ordinary pushes and merges cannot publish a Worker.
+**CI runs automatically; production deployment is explicit.** Pull requests and pushes to `main` trigger [MCP CI](.github/workflows/ci.yml), which runs tests and a Wrangler dry-run build. Ordinary pushes and merges do not publish a Worker.
 
-Production deployments use [Deploy MCP (release tag)](.github/workflows/deploy.yml). The **only** deployment trigger is pushing a `vX.Y.Z` tag to GitHub. The release tag must match `package.json` version and point to a commit already in `main`.
+Production deployments use [Deploy MCP (release tag or manual)](.github/workflows/deploy.yml). You can either push a `vX.Y.Z` release tag **or** manually start the workflow from the current `main` branch. The tag path requires a matching `package.json` version and a commit already on `main`; the manual path rejects other branches and stale commits.
 
 To deploy a release version (for example `0.3.0`), after merging the desired changes into `main`:
 
@@ -111,7 +111,15 @@ git tag v0.3.0
 git push origin v0.3.0
 ```
 
-For subsequent releases, bump the version in `package.json` and `package-lock.json`, commit it to `main`, then tag and push the corresponding `vX.Y.Z`. You can also create a new version tag in the GitHub Releases interface. The GitHub Actions workflow verifies the tag format, matching package version, source commit ancestry, tests and build **before** deploying the exact tagged commit. The `production` environment can additionally require approval.
+For subsequent tagged releases, bump the version in `package.json` and `package-lock.json`, commit it to `main`, then tag and push the corresponding `vX.Y.Z`. You can also create a new version tag in the GitHub Releases interface. The workflow verifies the tag format, matching package version, source commit ancestry, tests and build **before** deploying the exact tagged commit.
+
+**To deploy manually without creating a tag:**
+
+1. Open GitHub **Actions → Deploy MCP (release tag or manual)**.
+2. Click **Run workflow**, select the **main** branch, then click **Run workflow** again to confirm.
+3. Inspect the run: it verifies that the selected commit is the current `main` HEAD, then runs tests, a Wrangler dry-run build, production configuration validation, deploy, and a public-page smoke test.
+
+Manual runs do not bump the package version or make a GitHub release. Both paths use the same `production` environment and existing Cloudflare secrets; if environment approval is configured, the deployment waits for approval.
 
 The upstream deployment uses three Actions **environment secrets** on `production`:
 
@@ -135,9 +143,9 @@ period = 60
 
 Choose a unique rate-limit namespace within your Cloudflare account. The predeploy validation rejects missing required bindings **before** publishing and checks that the private configuration's `account_id` matches the `CLOUDFLARE_ACCOUNT_ID` environment secret. No real account or resource IDs belong in the public workflow. The workflow writes private configuration only on the GitHub runner and never applies D1 migrations automatically. Worker secrets stay in Cloudflare.
 
-**No deployment toggle or Run workflow button is needed:** `CF_DEPLOY_ENABLED` is unused and may be deleted from Actions variables.
+**Manual trigger is supported:** the **Run workflow** button appears once this workflow is present on the default branch. `CF_DEPLOY_ENABLED` is unused and may be deleted from Actions variables.
 
-**Forks:** The upstream tag-triggered deployment workflow intentionally runs only in the upstream repository. Fork maintainers must adapt the repository check and configure their own production environment secrets. You can always self-host and deploy manually with `npm run deploy`.
+**Forks:** This upstream production deployment workflow (tag or manual) intentionally runs only in the upstream repository. Fork maintainers must adapt the repository check and configure their own production environment secrets. You can always self-host and deploy locally with `npm run deploy`.
 
 ## Privacy and security
 
