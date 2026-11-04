@@ -15,7 +15,8 @@ concurrency:
 
 jobs:
   release:
-    if: github.repository == 'OTLFrostA/chrome-web-store-analytics-mcp' && github.event.head_commit.message == 'chore(release): bootstrap v0.2.0 deployment'
+    if: >-
+      github.repository == 'OTLFrostA/chrome-web-store-analytics-mcp' && github.event.head_commit.message == 'chore(release): bootstrap v0.2.0 deployment'
     runs-on: ubuntu-latest
     timeout-minutes: 20
     environment: production
