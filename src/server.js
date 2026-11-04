@@ -221,7 +221,7 @@ function createServer() {
 
   server.registerTool('set_brightdata_monthly_limit', {
     title: 'Set personal Bright Data monthly budget',
-    description: 'Cap Google keyword snapshot records per Pacific calendar month across the account's connected extensions (1–5000, default 200). This is a local safety cap, not the provider's shared free-tier balance.',
+    description: 'Cap Google keyword snapshot records per Pacific calendar month across all connected extensions in this account (1-5000, default 200). This is a local safety cap, not the shared free-tier balance of the provider.',
     inputSchema: { monthlyLimit: z.number().int().min(1).max(5000) },
     annotations: { readOnlyHint: false, destructiveHint: false, openWorldHint: false }, securitySchemes,
   }, async ({ monthlyLimit }) => withErrors(async () => {
