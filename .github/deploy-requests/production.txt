@@ -1,4 +1,4 @@
 Deploy request: 2026-11-03
-Target version: 0.3.1
-Reason: publish the Cloudflare-compatible SerpAPI redirect fix.
+Target version: 0.4.0
+Reason: replace SerpAPI with user-owned Bright Data Top-100 async ranking, preserve CWS analytics and D1 history.
 Requested by: repo owner via ChatGPT GitHub integration.
