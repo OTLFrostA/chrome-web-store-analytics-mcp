@@ -277,7 +277,7 @@ function createServer() {
 
   server.registerTool('collect_now', {
     title: 'Collect CWS metrics or keyword rankings now',
-    description: 'Run one or all collectors on demand: cws-analytics, cws-ranking (Chrome Web Store search), or google-search-ranking (SerpAPI organic Google results, requires a personal key and configured keywords). Writes history to D1.'
+    description: 'Run one or all collectors on demand: cws-analytics, cws-ranking (Chrome Web Store search), or google-search-ranking (SerpAPI organic Google results, requires a personal key and configured keywords). Writes history to D1.',
     inputSchema: {
       itemId: z.string().optional(),
       taskId: z.enum(['all', ...Object.keys(COLLECTORS)]).default('all'),
@@ -330,7 +330,7 @@ function createServer() {
 
   server.registerTool('get_collection_status', {
     title: 'Read scheduled collector configuration and recent runs',
-    description: 'Show daily collection status, separate Chrome Web Store and Google Search keyword configurations, private SerpAPI key presence and last 30 task runs.'
+    description: 'Show daily collection status, separate Chrome Web Store and Google Search keyword configurations, private SerpAPI key presence and last 30 task runs.',
     inputSchema: { itemId: z.string().optional() },
     annotations: { readOnlyHint: true, destructiveHint: false, openWorldHint: false }, securitySchemes,
   }, async ({ itemId }) => withErrors(async () => {
