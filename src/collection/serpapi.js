@@ -144,7 +144,7 @@ export async function collectGoogleSearchRankings({
   const date = localDay(now);
   const from = date.slice(0, 7) + '-01';
   const until = nextMonth(date.slice(0, 7));
-  const { monthlyLimit } = await getGoogleSearchBudget(env.MCP_DB, googleSub, now);
+  const { monthlyLimit, requestedThisMonth } = await getGoogleSearchBudget(env.MCP_DB, googleSub, now);
   let queried = 0, skipped = 0, found = 0, failed = 0, quotaReached = false;
   for (const entry of keywords) {
     const { keyword, market = MARKET, device = DEVICE } = entry;
@@ -155,6 +155,7 @@ export async function collectGoogleSearchRankings({
     if (Number(reserved.meta?.changes ?? 0) === 0) {
       // Includes already-queried keywords and an exhausted monthly budget.
       skipped++;
+      if (requestedThisMonth + queried >= monthlyLimit) quotaReached = true;
       continue;
     }
     queried++;
