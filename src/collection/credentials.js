@@ -48,42 +48,47 @@ export async function deleteCollectorCredential(env, googleSub) {
 }
 
 
-// SerpAPI is strictly BYOK: each authenticated Google user supplies and owns
-// their own credential. Reuse the existing 32-byte server-side encryption key
-// with a distinct AES-GCM associated-data domain to prevent credential swaps.
-const SERPAPI_PREFIX = 'user-serpapi:credential:v1:';
-function serpApiAAD(googleSub) { return new TextEncoder().encode('serpapi-key:v1:' + googleSub); }
+// User-owned Bright Data credentials stay encrypted in KV, account-bound via AES-GCM.
+// No shared provider key or secret is ever stored in D1 or returned over MCP.
+const BRIGHTDATA_PREFIX = 'user-brightdata:credential:v1:';
+const LEGACY_SERPAPI_PREFIX = 'user-serpapi:credential:v1:';
+function brightDataAAD(googleSub) {
+  return new TextEncoder().encode('brightdata-key:v1:' + googleSub);
+}
 
-export async function saveSerpApiKey(env, googleSub, apiKey) {
+export async function saveBrightDataKey(env, googleSub, apiKey) {
   if (typeof googleSub !== 'string' || !googleSub) throw new Error('Missing authenticated Google account.');
-  if (typeof apiKey !== 'string' || !/^[A-Za-z0-9_-]{12,256}$/.test(apiKey)) {
-    throw new Error('Invalid SerpAPI key format.');
+  if (typeof apiKey !== 'string' || !/^[A-Za-z0-9._~+-]{16,512}$/.test(apiKey)) {
+    throw new Error('Invalid Bright Data API token format.');
   }
   const key = await aesKey(env.SCHEDULE_TOKEN_KEY);
   const iv = crypto.getRandomValues(new Uint8Array(12));
   const cipher = await crypto.subtle.encrypt({
-    name: 'AES-GCM', iv, additionalData: serpApiAAD(googleSub),
+    name: 'AES-GCM', iv, additionalData: brightDataAAD(googleSub),
   }, key, new TextEncoder().encode(apiKey));
-  await env.OAUTH_KV.put(SERPAPI_PREFIX + googleSub, JSON.stringify({
+  await env.OAUTH_KV.put(BRIGHTDATA_PREFIX + googleSub, JSON.stringify({
     version: 1, iv: bytesToBase64(iv), ciphertext: bytesToBase64(new Uint8Array(cipher)),
   }));
+  // Once the replacement is securely saved, remove obsolete encrypted SerpAPI data.
+  await env.OAUTH_KV.delete(LEGACY_SERPAPI_PREFIX + googleSub);
 }
 
-export async function readSerpApiKey(env, googleSub) {
-  const record = await env.OAUTH_KV.get(SERPAPI_PREFIX + googleSub, 'json');
+export async function readBrightDataKey(env, googleSub) {
+  const record = await env.OAUTH_KV.get(BRIGHTDATA_PREFIX + googleSub, 'json');
   if (!record) return null;
-  if (record.version !== 1) throw new Error('Unsupported SerpAPI credential version.');
+  if (record.version !== 1) throw new Error('Unsupported Bright Data credential version.');
   const key = await aesKey(env.SCHEDULE_TOKEN_KEY);
   const plaintext = await crypto.subtle.decrypt({
-    name: 'AES-GCM', iv: bytesFromBase64(record.iv), additionalData: serpApiAAD(googleSub),
+    name: 'AES-GCM', iv: bytesFromBase64(record.iv), additionalData: brightDataAAD(googleSub),
   }, key, bytesFromBase64(record.ciphertext));
   return new TextDecoder().decode(plaintext);
 }
 
-export async function hasSerpApiKey(env, googleSub) {
-  return !!(await env.OAUTH_KV.get(SERPAPI_PREFIX + googleSub, 'text'));
+export async function hasBrightDataKey(env, googleSub) {
+  return !!(await env.OAUTH_KV.get(BRIGHTDATA_PREFIX + googleSub, 'text'));
 }
 
-export async function deleteSerpApiKey(env, googleSub) {
-  await env.OAUTH_KV.delete(SERPAPI_PREFIX + googleSub);
+export async function deleteBrightDataKey(env, googleSub) {
+  await env.OAUTH_KV.delete(BRIGHTDATA_PREFIX + googleSub);
+  await env.OAUTH_KV.delete(LEGACY_SERPAPI_PREFIX + googleSub);
 }
