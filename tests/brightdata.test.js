@@ -10,7 +10,7 @@ import {
   verifyBrightDataKey,isTargetStoreUrl,findGoogleStoreRank,
   updateGoogleSearchKeywords,listGoogleSearchKeywords,
   getGoogleSearchBudget,setGoogleSearchMonthlyLimit,
-  submitBrightDataRankings,pollBrightDataRun,parseBrightDataSnapshot,getGoogleSearchHistory,
+  submitBrightDataRankings,pollBrightDataRun,parseBrightDataSnapshot,getGoogleSearchHistory,sanitizedHttpError,
 } from '../src/collection/brightdata.js';
 
 const firstId = 'ldpbiafkgjlaooeplkiooljccpalpkgf';
@@ -246,3 +246,22 @@ test('MCP private settings app only sends Bright Data API key via tool call',()=
   assert.match(BRIGHTDATA_SETTINGS_HTML,/callTool\("remove_brightdata_key"/);
   assert.doesNotMatch(BRIGHTDATA_SETTINGS_HTML,/localStorage|sessionStorage|innerHTML\s*=/);
 });
+
+test('Bright Data 400 diagnostic classifies input and permissions without exposing raw provider content',async()=>{
+  for (const [raw,expected] of [
+    ['{"error":"validation_error","message":"Input should not contain start_page"}',
+      'http_400_invalid_start_page'],
+    ['{"error":"validation_error","message":"Invalid country value"}',
+      'http_400_invalid_country'],
+    ['{"error":"account does not have permission for scraper"}',
+      'http_400_access_denied'],
+    ['{"error":"insufficient credits for plan"}','http_400_billing'],
+    ['{"error":"unknown","secret":"BRIGHT_PRIVATE_TOKEN"}','http_400'],
+  ]) {
+    const result=await sanitizedHttpError(new Response(raw,{status:400}));
+    assert.equal(result.message,expected);
+    assert.doesNotMatch(result.message,/BRIGHT_PRIVATE_TOKEN|permission for scraper|Input should/);
+  }
+  assert.equal((await sanitizedHttpError(new Response(null,{status:302}))).message,'http_302');
+});
+

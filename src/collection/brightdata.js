@@ -22,8 +22,28 @@ function apiHeaders(apiKey, json = false) {
   };
 }
 
-function sanitizedHttpError(response) {
-  return new Error('http_' + response.status);
+// Classify vendor errors without ever logging or returning the raw response body,
+// which may contain a private API key or account identifiers.
+export async function sanitizedHttpError(response) {
+  const prefix = 'http_' + response.status;
+  if (response.status !== 400) return new Error(prefix);
+  let body = '';
+  try { body = (await response.text()).slice(0,4096).toLowerCase(); } catch { return new Error(prefix); }
+  let reason = null;
+  if (/permission|unauthoriz|not permitted|access denied|not allowed for (this |the )?account/.test(body))
+    reason = 'access_denied';
+  else if (/funds|balance|billing|credit|payment/.test(body))
+    reason = 'billing';
+  else if (/scraper.*(inactive|disabled)|not activated/.test(body))
+    reason = 'scraper_disabled';
+  else if (/dataset.*(not found|does not exist|invalid)/.test(body))
+    reason = 'dataset_unavailable';
+  else if (/validat|input|invalid|unsupported|unrecognized|should not contain|unexpected field/.test(body)) {
+    const field = ['country','start_page','end_page','language','keyword','url','dataset_id','format']
+      .find(name => new RegExp('(?:[^a-z_]|^)' + name + '(?:[^a-z_]|$)').test(body));
+    reason = field ? 'invalid_' + field : 'input_validation';
+  }
+  return new Error(prefix + (reason ? '_' + reason : ''));
 }
 
 export async function verifyBrightDataKey(apiKey, request = fetch) {
@@ -147,7 +167,7 @@ export async function submitBrightDataRankings({
       method:'POST',redirect:'manual',headers:apiHeaders(apiKey,true),
       body:JSON.stringify(selected.map(searchInput)),
     });
-    if (!response.ok) throw sanitizedHttpError(response);
+    if (!response.ok) throw await sanitizedHttpError(response);
     let payload;
     try {payload = await response.json();} catch {throw new Error('invalid_json');}
     const snapshotId = payload?.snapshot_id;
@@ -160,7 +180,7 @@ export async function submitBrightDataRankings({
     }),{expirationTtl:JOB_TTL_SECONDS});
     return {status:'pending',rowsWritten:0,requested:selected.length,skipped,quotaReached};
   } catch (error) {
-    const code = error instanceof Error && /^(http_[0-9]{3}|invalid_json|missing_snapshot_id)$/.test(error.message)
+    const code = error instanceof Error && /^(http_[0-9]{3}(?:_[a-z_]{3,48})?|invalid_json|missing_snapshot_id)$/.test(error.message)
       ? error.message : 'request_failed';
     for (const entry of selected) {
       await finishRow(env.MCP_DB,googleSub,item.itemId,date,entry,{status:'error',errorCode:code});
