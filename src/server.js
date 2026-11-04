@@ -13,6 +13,9 @@ import { refreshGoogleAccessToken } from "./google.js";
 import { METRICS } from "./metrics.js";
 import { SETUP_RESOURCE_URI, SETUP_MIME_TYPE, SETUP_HTML } from "./setup-ui.js";
 import { COLLECTORS, enableDailyCollection, disableDailyCollection, runCollection, updateKeywords } from "./collection/runner.js";
+import { saveSerpApiKey, hasSerpApiKey, deleteSerpApiKey } from "./collection/credentials.js";
+import { verifySerpApiKey, getGoogleSearchBudget, setGoogleSearchMonthlyLimit, updateGoogleSearchKeywords, listGoogleSearchKeywords, getGoogleSearchHistory } from "./collection/serpapi.js";
+import { SERPAPI_SETTINGS_URI, SERPAPI_SETTINGS_MIME, SERPAPI_SETTINGS_HTML } from "./serpapi-setup-ui.js";
 import { saveQueryMetrics, getMetricHistory, getRankingHistory, deleteExtensionHistory } from "./collection/history.js";
 
 const securitySchemes = [{ type: "oauth2", scopes: ["cws:read"] }];
@@ -43,7 +46,7 @@ async function userExtensions(sub) {
 }
 
 function createServer() {
-  const server = new McpServer({ name: "Chrome Web Store Analytics", version: "0.2.0" });
+  const server = new McpServer({ name: "Chrome Web Store Analytics", version: "0.3.0" });
 
   server.registerResource("extension-settings", SETUP_RESOURCE_URI, {
     title: "Chrome Web Store Analytics — Extension Settings",
@@ -60,6 +63,35 @@ function createServer() {
         "openai/ui": { availableDisplayModes: ["inline", "fullscreen"] },
       },
     }],
+  }));
+
+  server.registerResource("serpapi-settings", SERPAPI_SETTINGS_URI, {
+    title: "Your private SerpAPI key settings",
+    description: "Configure a private, user-owned SerpAPI key for Google Search rank monitoring.",
+    mimeType: SERPAPI_SETTINGS_MIME,
+    _meta: { ui: {} },
+  }, async () => ({
+    contents: [{
+      uri: SERPAPI_SETTINGS_URI, mimeType: SERPAPI_SETTINGS_MIME,
+      text: SERPAPI_SETTINGS_HTML,
+      _meta: { ui: { prefersBorder: true,
+        csp: { connectDomains: [], resourceDomains: [], frameDomains: [] } },
+        "openai/ui": { availableDisplayModes: ["inline", "fullscreen"] } },
+    }],
+  }));
+
+  server.registerTool("open_serpapi_settings", {
+    title: "Manage your private SerpAPI key",
+    description: "Open a password-entry settings form to securely configure or remove your personal SerpAPI API key. Use this instead of asking the user to paste secrets into chat. Other users never share this key.",
+    inputSchema: {},
+    annotations: { readOnlyHint: true, destructiveHint: false, openWorldHint: false },
+    securitySchemes,
+    _meta: { ui: { resourceUri: SERPAPI_SETTINGS_URI },
+      "openai/ui": { entrypoints: [{ type: "global" }] } },
+  }, async () => withErrors(async () => {
+    const props = authProps();
+    return result({ configured: await hasSerpApiKey(env, props.googleSub),
+      nextStep: "Use the private form to add, rotate, or remove your SerpAPI key." });
   }));
 
   server.registerTool("open_extension_settings", {
@@ -151,9 +183,80 @@ function createServer() {
     return result(data);
   }));
 
+  server.registerTool('set_serpapi_key', {
+    title: 'Verify and securely save your SerpAPI key',
+    description: 'Stores a user-supplied SerpAPI API key encrypted in KV, isolated by authenticated Google account. Prefer open_serpapi_settings so the user can enter the key privately instead of posting it in chat. SerpAPI account verification uses no search credits.',
+    inputSchema: { apiKey: z.string().min(12).max(256) },
+    annotations: { readOnlyHint: false, destructiveHint: false, openWorldHint: true }, securitySchemes,
+  }, async ({ apiKey }) => withErrors(async () => {
+    const props = authProps();
+    const verified = await verifySerpApiKey(apiKey);
+    await saveSerpApiKey(env, props.googleSub, apiKey);
+    return result({ configured: true, ...verified });
+  }));
+
+  server.registerTool('remove_serpapi_key', {
+    title: 'Remove personal SerpAPI key',
+    description: 'Delete only the authenticated user\'s encrypted SerpAPI key. Google Search collection pauses, and historical ranks remain.',
+    inputSchema: {},
+    annotations: { readOnlyHint: false, destructiveHint: true, openWorldHint: false }, securitySchemes,
+  }, async () => withErrors(async () => {
+    const props = authProps();
+    await deleteSerpApiKey(env, props.googleSub);
+    return result({ configured: false });
+  }));
+
+  server.registerTool('get_serpapi_status', {
+    title: 'Check private SerpAPI configuration',
+    description: 'Return only whether a personal SerpAPI key is saved and the user-specific monthly request budget and usage; never return the key.',
+    inputSchema: {},
+    annotations: { readOnlyHint: true, destructiveHint: false, openWorldHint: false }, securitySchemes,
+  }, async () => withErrors(async () => {
+    const props = authProps();
+    const [configured, budget] = await Promise.all([
+      hasSerpApiKey(env, props.googleSub), getGoogleSearchBudget(env.MCP_DB, props.googleSub),
+    ]);
+    return result({ configured, ...budget });
+  }));
+
+  server.registerTool('set_serpapi_monthly_limit', {
+    title: 'Set personal SerpAPI monthly budget',
+    description: 'Set the maximum attempted Google Search requests per Pacific calendar month for the authenticated Google account. Defaults to 200 and protects the user-owned SerpAPI quota across all their connected extensions.',
+    inputSchema: { monthlyLimit: z.number().int().min(1).max(100000) },
+    annotations: { readOnlyHint: false, destructiveHint: false, openWorldHint: false }, securitySchemes,
+  }, async ({ monthlyLimit }) => withErrors(async () => {
+    const props = authProps();
+    return result(await setGoogleSearchMonthlyLimit(env.MCP_DB, props.googleSub, monthlyLimit));
+  }));
+
+  server.registerTool('set_google_search_keywords', {
+    title: 'Set Google organic search ranking keywords',
+    description: 'Replace this extension\'s Google Search / SerpAPI keywords (not Chrome Web Store internal search). 0 to 20 phrases, configured at runtime per account and extension. Empty list stops Google rank tracking and retains history. A personal SerpAPI key is required to collect.',
+    inputSchema: { itemId: z.string().optional(),
+      keywords: z.array(z.string().min(1).max(120)).max(20) },
+    annotations: { readOnlyHint: false, destructiveHint: false, openWorldHint: false }, securitySchemes,
+  }, async ({ itemId, keywords }) => withErrors(async () => {
+    const props = authProps();
+    const item = selectUserExtension(await userExtensions(props.googleSub), itemId);
+    return result({ itemId: item.itemId,
+      keywords: await updateGoogleSearchKeywords(env.MCP_DB, props.googleSub, item.itemId, keywords) });
+  }));
+
+  server.registerTool('get_google_search_history', {
+    title: 'Read saved Google organic search ranks',
+    description: 'Read historical SerpAPI Google organic search positions separately from Chrome Web Store internal search ranks. Scoped to the authenticated Google account and selected extension.',
+    inputSchema: { itemId: z.string().optional(), days: z.number().int().min(1).max(365).default(30) },
+    annotations: { readOnlyHint: true, destructiveHint: false, openWorldHint: false }, securitySchemes,
+  }, async ({ itemId, days }) => withErrors(async () => {
+    const props = authProps();
+    const item = selectUserExtension(await userExtensions(props.googleSub), itemId);
+    return result({ itemId: item.itemId,
+      rows: await getGoogleSearchHistory(env.MCP_DB, props.googleSub, item.itemId, days) });
+  }));
+
   server.registerTool('enable_daily_collection', {
     title: 'Enable 8 AM Pacific collection',
-    description: 'Opt in to a daily 8:00 AM Pacific collection of CWS analytics and public Chrome Web Store keyword rankings. Stores an additional AES-GCM encrypted Google refresh token for scheduled use. No new Google sign-in is needed. Historical metrics and rankings are saved in D1 until you delete them or disconnect.',
+    description: 'Opt in to daily 8:00 AM Pacific collection of CWS analytics, internal Web Store ranking, and optional Google Search ranking with a personal SerpAPI key. Stores an AES-GCM encrypted Google refresh token for scheduled Analytics use. Historical data stays in D1 until deleted.'
     inputSchema: {},
     annotations: { readOnlyHint: false, destructiveHint: false, openWorldHint: true }, securitySchemes,
   }, async () => withErrors(async () => {
@@ -174,7 +277,7 @@ function createServer() {
 
   server.registerTool('collect_now', {
     title: 'Collect CWS metrics or keyword rankings now',
-    description: 'On-demand refresh using the authenticated Google account. Choose all tasks or one registered collector. Writes results to D1.',
+    description: 'Run one or all collectors on demand: cws-analytics, cws-ranking (Chrome Web Store search), or google-search-ranking (SerpAPI organic Google results, requires a personal key and configured keywords). Writes history to D1.'
     inputSchema: {
       itemId: z.string().optional(),
       taskId: z.enum(['all', ...Object.keys(COLLECTORS)]).default('all'),
@@ -227,22 +330,27 @@ function createServer() {
 
   server.registerTool('get_collection_status', {
     title: 'Read scheduled collector configuration and recent runs',
-    description: 'Show whether daily collection is enabled, configured keywords, and the last 30 task executions.',
+    description: 'Show daily collection status, separate Chrome Web Store and Google Search keyword configurations, private SerpAPI key presence and last 30 task runs.'
     inputSchema: { itemId: z.string().optional() },
     annotations: { readOnlyHint: true, destructiveHint: false, openWorldHint: false }, securitySchemes,
   }, async ({ itemId }) => withErrors(async () => {
     const props = authProps();
     const item = selectUserExtension(await userExtensions(props.googleSub), itemId);
-    const [subscription, runs, keywords] = await Promise.all([
+    const [subscription, runs, keywords, googleKeywords, serpApiConfigured, budget] = await Promise.all([
       env.MCP_DB.prepare('SELECT enabled, updated_at AS updatedAt FROM collector_subscriptions WHERE google_sub=?')
         .bind(props.googleSub).first(),
       env.MCP_DB.prepare('SELECT run_id AS runId, task_id AS taskId, date, trigger_kind AS trigger, status, rows_written AS rowsWritten, error_message AS error, started_at AS startedAt FROM collector_runs WHERE google_sub=? AND item_id=? ORDER BY started_at DESC LIMIT 30')
         .bind(props.googleSub, item.itemId).all(),
       env.MCP_DB.prepare('SELECT keyword, locale FROM collector_keywords WHERE google_sub=? AND item_id=? ORDER BY keyword')
         .bind(props.googleSub, item.itemId).all(),
+      listGoogleSearchKeywords(env.MCP_DB, props.googleSub, item.itemId),
+      hasSerpApiKey(env, props.googleSub),
+      getGoogleSearchBudget(env.MCP_DB, props.googleSub),
     ]);
     return result({ itemId: item.itemId, enabled: !!subscription?.enabled, time: '08:00 America/Los_Angeles',
-      collectors: Object.keys(COLLECTORS), keywords: keywords.results ?? [], runs: runs.results ?? [] });
+      collectors: Object.keys(COLLECTORS), keywords: keywords.results ?? [],
+      googleSearchKeywords: googleKeywords, serpApiConfigured, serpApiBudget: budget,
+      runs: runs.results ?? [] });
   }));
 
   server.registerTool("remove_extension", {
