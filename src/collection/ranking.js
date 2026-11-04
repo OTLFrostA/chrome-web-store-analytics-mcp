@@ -2,11 +2,6 @@ const STORE = 'https://chromewebstore.google.com';
 const RPC_PATH = '/_/ChromeWebStoreConsumerFeUi/data/batchexecute';
 const SEARCH_RPC_ID = 'zTyKYc'; // Unofficial Web Store RPC; monitor for breakage.
 
-export const DEFAULT_KEYWORDS = [
-  'gemini exporter', 'bulk export gemini', 'export gemini chats',
-  'gemini chat exporter', 'export all gemini chats', 'save gemini chats',
-];
-
 export function parseSearchResults(raw) {
   const first = raw.indexOf('[[');
   if (first < 0) throw new Error('Search response did not contain an RPC frame.');
