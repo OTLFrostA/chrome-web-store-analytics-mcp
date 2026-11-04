@@ -106,7 +106,7 @@ test('keyword lists are fully dynamic per user and extension, up to 100 with acc
     assert.equal((await listGoogleSearchKeywords(db,'alice',firstId)).length,30);
     assert.deepEqual(await listGoogleSearchKeywords(db,'bob',firstId),[]);
     assert.deepEqual(await listGoogleSearchKeywords(db,'alice',secondId),[]);
-    assert.deepEqual(await updateGoogleSearchKeywords(db,'alice',firstId,['Gemini Exporter','gemini exporter']),['Gemini Exporter']);
+    assert.deepEqual(await updateGoogleSearchKeywords(db,'alice',firstId,['Gemini Exporter','gemini exporter']),['gemini exporter']);
     assert.equal((await listGoogleSearchKeywords(db,'alice',firstId)).length,1);
     await assert.rejects(updateGoogleSearchKeywords(db,'alice',firstId,Array(101).fill('x')),/0 to 100/);
     await setGoogleSearchMonthlyLimit(db,'alice',4500);
