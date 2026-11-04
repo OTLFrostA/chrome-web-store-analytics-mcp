@@ -2,8 +2,12 @@ name: Deploy MCP (release tag or manual)
 
 on:
   push:
+    branches:
+      - main
     tags:
       - 'v*'
+    paths:
+      - '.github/deploy-requests/production.txt'
   workflow_dispatch:
 
 permissions:
@@ -54,7 +58,18 @@ jobs:
               exit 1
             fi
             echo "Verified manual production deployment: main at $SOURCE_SHA"
-          elif [[ "$GITHUB_EVENT_NAME" == "push" ]]; then
+          elif [[ "$GITHUB_EVENT_NAME" == "push" && "$GITHUB_REF" == "refs/heads/main" ]]; then
+            if [[ "$SOURCE_SHA" != "$(git rev-parse origin/main)" ]]; then
+              echo "::error::Deploy request must target the current main commit"
+              exit 1
+            fi
+            changed_paths="$(git diff-tree --no-commit-id --name-only -r "$SOURCE_SHA")"
+            if [[ "$changed_paths" != ".github/deploy-requests/production.txt" ]]; then
+              echo "::error::Automated deploy request must only modify the deployment request marker"
+              exit 1
+            fi
+            echo "Verified explicit production deploy request on main at $SOURCE_SHA"
+          elif [[ "$GITHUB_EVENT_NAME" == "push" && "$GITHUB_REF" == refs/tags/* ]]; then
             if [[ ! "$TAG" =~ ^v([0-9]+\.[0-9]+\.[0-9]+)$ ]]; then
               echo "::error::Deployment tag must be vX.Y.Z, got $TAG"
               exit 1
