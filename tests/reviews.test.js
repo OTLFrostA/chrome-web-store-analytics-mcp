@@ -54,7 +54,7 @@ test('review API uses official OAuth origin, descending order, 200-page limit an
   assert.equal(requests[0].url.hostname,'chromewebstore.googleapis.com');
   assert.match(requests[0].url.pathname,/fetchReviews$/);
   assert.equal(requests[0].url.searchParams.get('pageSize'),'200');
-  assert.equal(requests[0].url.searchParams.get('orderBy'),'createTime desc');
+  assert.equal(requests[0].url.searchParams.get('orderBy'),'create_time desc');
   assert.equal(requests[0].url.searchParams.get('pageToken'),'previous-page');
   assert.equal(requests[0].options.redirect,'manual');
   assert.equal(requests[0].options.headers.Authorization,'Bearer access-token');
@@ -181,3 +181,35 @@ test('unlink and account deletion clean up private review rows and settings with
     assert.deepEqual(await getReviewSettings(db,'bob',itemId),{enabled:true,maxPages:5});
   }finally{sqlite.close();}
 });
+
+
+test('review collector retries legacy camelCase ordering only after a first-page HTTP 400',async()=>{
+  const {db,sqlite}=mockD1();
+  try{
+    const requested=[];
+    const env={MCP_DB:db,GOOGLE_API_RATE_LIMITER:{async limit(){return {success:true};}}};
+    const request=async url=>{
+      const parsed=new URL(url);
+      if(parsed.hostname==='oauth2.googleapis.com')return Response.json({access_token:'access-token'});
+      requested.push(parsed.searchParams.get('orderBy'));
+      if(requested.length===1)return new Response('invalid orderBy create_time: secret user value',{status:400});
+      if(requested.length===2)return Response.json({reviews:[first('one')],nextPageToken:'p2'});
+      return Response.json({reviews:[first('two')]});
+    };
+    const result=await collectReviews({env,googleSub:'alice',item:{itemId,publisherId},
+      refreshToken:'oauth-refresh',request,paceMs:0});
+    assert.equal(result.newReviews,2);
+    assert.deepEqual(requested,['create_time desc','createTime desc','createTime desc']);
+  }finally{sqlite.close();}
+});
+
+test('a provider 400 diagnostic only exposes fixed reason codes, never response text or secrets',async()=>{
+  const err=await assert.rejects(fetchReviewPage('token',publisherId,itemId,null,
+    async()=>new Response('Bad orderBy: secret publisher123 and oauth-token',{status:400})),/HTTP 400_invalid_order/);
+  const responseBody='permission denied, token sensitive-key';
+  await assert.rejects(fetchReviewPage('token',publisherId,itemId,null,
+    async()=>new Response(responseBody,{status:400})),/HTTP 400/);
+  await assert.rejects(fetchReviewPage('token',publisherId,itemId,null,
+    async()=>new Response('unsupported pageSize: private info',{status:400})),/HTTP 400_invalid_pagination/);
+});
+

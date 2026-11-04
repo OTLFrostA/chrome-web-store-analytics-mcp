@@ -51,19 +51,35 @@ export function normalizeReview(review, publisherId, itemId) {
     authorName,createTime:new Date(review.createTime).toISOString()};
 }
 
+// The Google REST docs use createTime, while generated clients and API discovery
+// historically advertise create_time. Keep a bounded fallback for API variance.
 export async function fetchReviewPage(accessToken, publisherId, itemId,
-  pageToken, request=fetch) {
+  pageToken, request=fetch, orderBy='create_time desc') {
+  if(orderBy!=='create_time desc' && orderBy!=='createTime desc')
+    throw new Error('Invalid review order.');
+
   const url=new URL(BASE+encodeURIComponent(publisherId)+'/items/'+
     encodeURIComponent(itemId)+':fetchReviews');
   url.searchParams.set('pageSize',String(PAGE_SIZE));
-  url.searchParams.set('orderBy','createTime desc');
+  url.searchParams.set('orderBy',orderBy);
   if(pageToken)url.searchParams.set('pageToken',pageToken);
   const response=await request(url.toString(),{
     method:'GET',redirect:'manual',
     headers:{Authorization:'Bearer '+accessToken,Accept:'application/json'},
   });
-  if(!response.ok)throw new Error('Chrome Web Store reviews request failed (HTTP '+
-    response.status+').');
+  if(!response.ok) {
+    let code = '';
+    if(response.status===400) {
+      // Never return or log the provider response, which may identify users.
+      let body = '';
+      try { body=(await response.text()).slice(0,4096).toLowerCase(); } catch {}
+      if(/order.?by|create.?time|sort/.test(body))code='_invalid_order';
+      else if(/page.?size|page.?token/.test(body))code='_invalid_pagination';
+      else if(/publisher|item|resource.?name/.test(body))code='_invalid_resource';
+    }
+    throw new Error('Chrome Web Store reviews request failed (HTTP '+
+      response.status+code+').');
+  }
   let payload;
   try{payload=await response.json();}catch{throw new Error('Invalid Chrome Web Store reviews JSON.');}
   if(!payload||typeof payload!=='object'||Array.isArray(payload)||
@@ -133,10 +149,21 @@ export async function collectReviews({env,googleSub,item,refreshToken,
   };
   const accessToken=await refreshGoogleAccessToken(env,refreshToken,paced);
   let token=null,newReviews=0,updatedReviews=0,pagesFetched=0,fetched=0;
+  let orderBy='create_time desc';
   const seenTokens=new Set();
   let hasMore=false;
   for(let page=0;page<settings.maxPages;page++) {
-    const data=await fetchReviewPage(accessToken,item.publisherId,item.itemId,token,paced);
+    let data;
+    try {
+      data=await fetchReviewPage(accessToken,item.publisherId,item.itemId,token,paced,orderBy);
+    } catch(error) {
+      // Retry the *first* page only if Google rejects the field syntax (HTTP 400).
+      // Keep the selected spelling fixed across subsequent page tokens.
+      if(page!==0 || !(error instanceof Error) || !/HTTP 400/.test(error.message))
+        throw error;
+      orderBy='createTime desc';
+      data=await fetchReviewPage(accessToken,item.publisherId,item.itemId,token,paced,orderBy);
+    }
     pagesFetched++;
     fetched+=data.reviews.length;
     const saved=await saveReviewPage(env.MCP_DB,googleSub,item.itemId,data.reviews);

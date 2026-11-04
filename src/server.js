@@ -48,7 +48,7 @@ async function userExtensions(sub) {
 }
 
 function createServer() {
-  const server = new McpServer({ name: "Chrome Web Store Analytics", version: "0.5.0" });
+  const server = new McpServer({ name: "Chrome Web Store Analytics", version: "0.5.1" });
 
   server.registerResource("extension-settings", SETUP_RESOURCE_URI, {
     title: "Chrome Web Store Analytics — Extension Settings",
