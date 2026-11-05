@@ -3,7 +3,7 @@ import { dateRange, MAX_OUTPUT_ROWS } from "./validation.js";
 import { saveMetricHistory, saveRankingHistory } from "./collection/history.js";
 import { fetchExtensionStatus, getRatingSummary } from "./read-only.js";
 import { saveRatingSnapshot, saveStatusEvent, saveWebStoreSearchSnapshot } from "./collection/snapshots.js";
-import { queryAndStoreReviewPage } from "./collection/reviews.js";
+import { fetchReviewPage, saveReviewPage } from "./collection/reviews.js";
 import { searchWebStore } from "./collection/ranking.js";
 import { submitBrightDataRankings, pollBrightDataRun } from "./collection/brightdata.js";
 import { googleFetch } from "./rate-limit.js";
@@ -57,7 +57,15 @@ export async function queryAndStoreRating({db,googleSub,item,token,request=fetch
   return summary;
 }
 
-export {queryAndStoreReviewPage};
+export async function queryAndStoreReviewPage({
+  db,googleSub,item,token,pageToken=null,request=fetch,
+  orderBy="create_time desc",pageSize=200,rating,
+}) {
+  const page=await fetchReviewPage(token,item.publisherId,item.itemId,pageToken,
+    request,orderBy,{pageSize,rating});
+  const persisted=await saveReviewPage(db,googleSub,item.itemId,page.reviews);
+  return {...page,persisted};
+}
 
 export async function queryAndStoreWebStoreRank({
   db,googleSub,item,keyword,locale="en-US",now=Date.now(),request=fetch,
