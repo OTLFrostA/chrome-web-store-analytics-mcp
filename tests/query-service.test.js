@@ -131,7 +131,7 @@ test("webstore ranked search snapshots retain every returned result, not only ou
     assert.equal(result.rank,1);
     const history=await getWebStoreSearchSnapshots(db,"alice",id,365);
     assert.equal(history.length,1);
-    assert.equal(history[0].results.length,1); // duplicate IDs are removed
+    assert.equal(history[0].results.length,2); // retain other extensions in the search results
     assert.equal(sqlite.prepare("SELECT COUNT(*) AS n FROM webstore_search_snapshots WHERE google_sub='bob'").get().n,0);
   }finally{sqlite.close();}
 });
