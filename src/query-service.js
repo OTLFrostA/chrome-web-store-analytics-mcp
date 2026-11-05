@@ -3,7 +3,7 @@ import { dateRange, MAX_OUTPUT_ROWS } from "./validation.js";
 import { saveMetricHistory, saveRankingHistory } from "./collection/history.js";
 import { fetchExtensionStatus, getRatingSummary } from "./read-only.js";
 import { saveRatingSnapshot, saveStatusEvent, saveWebStoreSearchSnapshot } from "./collection/snapshots.js";
-import { fetchReviewPage, saveReviewPage } from "./collection/reviews.js";
+import { fetchReviewPage, saveReviewPage, getReviewSettings } from "./collection/reviews.js";
 import { searchWebStore } from "./collection/ranking.js";
 import { submitBrightDataRankings, pollBrightDataRun } from "./collection/brightdata.js";
 import { googleFetch } from "./rate-limit.js";
@@ -65,6 +65,60 @@ export async function queryAndStoreReviewPage({
     request,orderBy,{pageSize,rating});
   const persisted=await saveReviewPage(db,googleSub,item.itemId,page.reviews);
   return {...page,persisted};
+}
+
+export async function collectAndStoreReviews({env,googleSub,item,refreshToken,
+  request=fetch,paceMs=3200}) {
+  const settings=await getReviewSettings(env.MCP_DB,googleSub,item.itemId);
+  if (!settings.enabled) return {rowsWritten:0,skipped:true,reason:"Review collection is disabled."};
+  let nextRequestAt=0;
+  const paced=async(url,options)=>{
+    const pause=Math.max(0,nextRequestAt-Date.now());
+    if (pause) await new Promise(resolve=>setTimeout(resolve,pause));
+    nextRequestAt=Date.now()+paceMs;
+    return request(url,options);
+  };
+  const access=await googleQueryAccess({env,googleSub,refreshToken,request:paced});
+  let pageToken=null,orderBy="create_time desc",newReviews=0,updatedReviews=0,
+    fetched=0,pagesFetched=0,truncated=false;
+  const seen=new Set();
+  for (let i=0;i<settings.maxPages;i++) {
+    let page;
+    try {
+      page=await queryAndStoreReviewPage({
+        db:env.MCP_DB,googleSub,item,token:access.token,pageToken,
+        request:access.request,orderBy,
+      });
+    } catch (error) {
+      if (i!==0 || !(error instanceof Error) || !/HTTP 400/.test(error.message)) throw error;
+      orderBy="createTime desc";
+      page=await queryAndStoreReviewPage({
+        db:env.MCP_DB,googleSub,item,token:access.token,pageToken,
+        request:access.request,orderBy,
+      });
+    }
+    pagesFetched++;
+    fetched+=page.reviews.length;
+    newReviews+=page.persisted.newReviews;
+    updatedReviews+=page.persisted.updatedReviews;
+    pageToken=page.nextPageToken;
+    truncated=!!pageToken;
+    if (!pageToken) break;
+    if (seen.has(pageToken)) throw new Error("Chrome Web Store reviews pagination repeated a token.");
+    seen.add(pageToken);
+  }
+  return {rowsWritten:newReviews,newReviews,updatedReviews,pagesFetched,fetched,truncated};
+}
+
+export async function collectAndStoreMetadata({env,googleSub,item,refreshToken,request=fetch}) {
+  const access=await googleQueryAccess({env,googleSub,refreshToken,request});
+  await queryAndStoreStatus({
+    db:env.MCP_DB,googleSub,item,token:access.token,request:access.request,
+  });
+  await queryAndStoreRating({
+    db:env.MCP_DB,googleSub,item,token:access.token,request:access.request,
+  });
+  return {rowsWritten:2};
 }
 
 export async function queryAndStoreWebStoreRank({
