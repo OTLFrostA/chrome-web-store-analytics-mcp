@@ -1,5 +1,3 @@
-import { refreshGoogleAccessToken } from '../google.js';
-import { googleFetch } from '../rate-limit.js';
 
 const BASE = 'https://chromewebstore.googleapis.com/v2/publishers/';
 const PAGE_SIZE = 200;
@@ -143,49 +141,4 @@ export async function getSavedReviews(db,googleSub,itemId,{limit=100,newWithinDa
     ' ORDER BY create_time DESC,review_name DESC LIMIT ?')
     .bind(...params,limit).all();
   return results??[];
-}
-
-export async function collectReviews({env,googleSub,item,refreshToken,
-  request=fetch,paceMs=3200}) {
-  if(!refreshToken)throw new Error('Google OAuth credential is required to collect reviews.');
-  const settings=await getReviewSettings(env.MCP_DB,googleSub,item.itemId);
-  if(!settings.enabled)return {rowsWritten:0,skipped:true,reason:'Review collection is disabled.'};
-  const checked=googleFetch(env.GOOGLE_API_RATE_LIMITER,googleSub,request);
-  let nextRequestAt=0;
-  const paced=async(url,options)=>{
-    const pause=Math.max(0,nextRequestAt-Date.now());
-    if(pause)await new Promise(resolve=>setTimeout(resolve,pause));
-    nextRequestAt=Date.now()+paceMs;
-    return checked(url,options);
-  };
-  const accessToken=await refreshGoogleAccessToken(env,refreshToken,paced);
-  let token=null,newReviews=0,updatedReviews=0,pagesFetched=0,fetched=0;
-  let orderBy='create_time desc';
-  const seenTokens=new Set();
-  let hasMore=false;
-  for(let page=0;page<settings.maxPages;page++) {
-    let data;
-    try {
-      data=await fetchReviewPage(accessToken,item.publisherId,item.itemId,token,paced,orderBy);
-    } catch(error) {
-      // Retry the *first* page only if Google rejects the field syntax (HTTP 400).
-      // Keep the selected spelling fixed across subsequent page tokens.
-      if(page!==0 || !(error instanceof Error) || !/HTTP 400/.test(error.message))
-        throw error;
-      orderBy='createTime desc';
-      data=await fetchReviewPage(accessToken,item.publisherId,item.itemId,token,paced,orderBy);
-    }
-    pagesFetched++;
-    fetched+=data.reviews.length;
-    const saved=await saveReviewPage(env.MCP_DB,googleSub,item.itemId,data.reviews);
-    newReviews+=saved.newReviews;
-    updatedReviews+=saved.updatedReviews;
-    token=data.nextPageToken;
-    hasMore=!!token;
-    if(!token)break;
-    if(seenTokens.has(token))throw new Error('Chrome Web Store review pagination repeated a token.');
-    seenTokens.add(token);
-  }
-  return {rowsWritten:newReviews,newReviews,updatedReviews,fetched,pagesFetched,
-    truncated:hasMore};
 }
