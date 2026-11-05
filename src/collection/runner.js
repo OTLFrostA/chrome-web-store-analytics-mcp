@@ -1,10 +1,9 @@
 import { listUserExtensions } from '../storage.js';
 import { collectMetrics } from './metrics.js';
-import { searchWebStore } from './ranking.js';
-import { saveRankingHistory } from './history.js';
-import { collectReviews, getReviewSettings } from './reviews.js';
+import { getReviewSettings } from './reviews.js';
+import { queryAndStoreWebStoreRank,queryAndStoreBrightDataRankings,refreshAndStoreBrightDataRankings,collectAndStoreReviews,collectAndStoreMetadata } from '../query-service.js';
 import { readCollectorCredential, saveCollectorCredential, deleteCollectorCredential, hasBrightDataKey, readBrightDataKey } from './credentials.js';
-import { submitBrightDataRankings, pollBrightDataRun, listGoogleSearchKeywords } from './brightdata.js';
+import { listGoogleSearchKeywords } from './brightdata.js';
 import { localDay, localHour } from './time.js';
 
 async function listRankingKeywords(db, googleSub, itemId) {
@@ -16,8 +15,8 @@ async function listRankingKeywords(db, googleSub, itemId) {
 async function collectRankings({ env, googleSub, item, now, keywords }) {
   const rankings = [];
   for (const { keyword, locale } of keywords) {
-    const found = await searchWebStore(keyword, locale);
-    rankings.push(await saveRankingHistory(env.MCP_DB, googleSub, item.itemId, keyword, locale, found, now));
+    const {results,...rank}=await queryAndStoreWebStoreRank({db:env.MCP_DB,googleSub,item,keyword,locale,now});
+    rankings.push(rank);
   }
   return { rowsWritten: rankings.length, rankings };
 }
@@ -26,9 +25,10 @@ async function collectRankings({ env, googleSub, item, now, keywords }) {
 export const COLLECTORS = Object.freeze({
   'cws-analytics': { id: 'cws-analytics', schedule: { hourPT: 8 }, collect: collectMetrics },
   'cws-ranking': { id: 'cws-ranking', schedule: { hourPT: 8 }, collect: collectRankings },
-  'google-search-ranking': { id: 'google-search-ranking', schedule: { hourPT: 8 }, collect: submitBrightDataRankings },
+  'google-search-ranking': { id: 'google-search-ranking', schedule: { hourPT: 8 }, collect: queryAndStoreBrightDataRankings },
   // Offset review polling so it does not contend with the 8 AM analytics API quota.
-  'cws-reviews': { id: 'cws-reviews', schedule: { hourPT: 9 }, collect: collectReviews },
+  'cws-reviews': { id: 'cws-reviews', schedule: { hourPT: 9 }, collect: collectAndStoreReviews },
+  'cws-metadata': { id: 'cws-metadata', schedule: { hourPT: 9 }, collect: collectAndStoreMetadata },
 });
 
 export async function updateKeywords(db, googleSub, itemId, keywords) {
@@ -88,7 +88,7 @@ export async function runOneCollector({ env, googleSub, item, taskId, trigger = 
     VALUES (?, ?, ?, ?, ?, ?, 'running')`).bind(runId, googleSub, item.itemId, taskId, date, trigger).run();
   if ((claim.meta?.changes ?? 0) === 0) return { taskId, skipped: true, reason: 'Already scheduled today.' };
   try {
-    const credential = ['cws-analytics', 'cws-reviews'].includes(taskId)
+    const credential = ['cws-analytics', 'cws-reviews', 'cws-metadata'].includes(taskId)
       ? (refreshToken || await readCollectorCredential(env, googleSub)) : undefined;
     const apiKey = taskId === 'google-search-ranking' ? await readBrightDataKey(env, googleSub) : undefined;
     const result = await collector.collect({
@@ -138,7 +138,7 @@ export async function pollPendingBrightDataRankings({env, googleSub, itemId, lim
         runs.push({runId:job.runId,status:'pending',reason:'User Bright Data key is not configured.'});
         continue;
       }
-      runs.push(await pollBrightDataRun({env,googleSub:job.googleSub,
+      runs.push(await refreshAndStoreBrightDataRankings({env,googleSub:job.googleSub,
         itemId:job.itemId,runId:job.runId,apiKey:key,request}));
     } catch {
       // Do not leak response bodies or credentials into logs/tool outputs.
