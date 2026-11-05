@@ -1,6 +1,6 @@
 # Chrome Web Store Analytics MCP
 
-Explore your Chrome extension's analytics, reviews, and search rankings in **ChatGPT** or another OAuth-capable MCP client. Google access is **read-only**: this MCP cannot edit listings, publish updates, or reply to reviews.
+Explore your Chrome extension's analytics, ratings, reviews, publishing status, and search rankings in **ChatGPT** or another OAuth-capable MCP client. Google access is **read-only**: this MCP cannot edit listings, publish updates, or reply to reviews.
 
 ## Connect
 
@@ -16,6 +16,8 @@ Explore your Chrome extension's analytics, reviews, and search rankings in **Cha
 - “Show installs and active users for my extension over the last 90 days.”
 - “Compare impressions by country over the last month.”
 - “Fetch the latest reviews and summarize common complaints.”
+- “What version is published, is another revision pending review, and are there policy warnings?”
+- “Show my average rating and 1–5 star rating breakdown.”
 - “Track these Chrome Web Store search keywords for my extension: …”
 - “Enable daily collection and show my historical metrics and rankings.”
 

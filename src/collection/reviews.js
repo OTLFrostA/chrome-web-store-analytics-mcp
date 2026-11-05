@@ -54,14 +54,25 @@ export function normalizeReview(review, publisherId, itemId) {
 // The Google REST docs use createTime, while generated clients and API discovery
 // historically advertise create_time. Keep a bounded fallback for API variance.
 export async function fetchReviewPage(accessToken, publisherId, itemId,
-  pageToken, request=fetch, orderBy='create_time desc') {
-  if(orderBy!=='create_time desc' && orderBy!=='createTime desc')
-    throw new Error('Invalid review order.');
+  pageToken, request=fetch, orderBy='create_time desc', {pageSize=PAGE_SIZE,rating}={}) {
+  const supportedOrders=[
+    'create_time desc', 'createTime desc', 'rating asc', 'rating desc',
+    'rating asc, createTime desc', 'rating desc, createTime desc',
+  ];
+  if(!supportedOrders.includes(orderBy))throw new Error('Invalid review order.');
+  if(!Number.isInteger(pageSize)||pageSize<1||pageSize>PAGE_SIZE)
+    throw new Error('Review page size must be 1-200.');
+  if(rating!==undefined && (!Number.isInteger(rating)||rating<1||rating>5))
+    throw new Error('Review rating filter must be 1-5.');
+  if(pageToken!==null && pageToken!==undefined &&
+      (typeof pageToken!=='string'||!pageToken||pageToken.length>4096))
+    throw new Error('Invalid review page token.');
 
   const url=new URL(BASE+encodeURIComponent(publisherId)+'/items/'+
     encodeURIComponent(itemId)+':fetchReviews');
-  url.searchParams.set('pageSize',String(PAGE_SIZE));
+  url.searchParams.set('pageSize',String(pageSize));
   url.searchParams.set('orderBy',orderBy);
+  if(rating!==undefined)url.searchParams.set('filter','rating = '+rating);
   if(pageToken)url.searchParams.set('pageToken',pageToken);
   const response=await request(url.toString(),{
     method:'GET',redirect:'manual',
