@@ -1,16 +1,18 @@
 import { addDate } from "./dates.js";
-import { JOBS } from "./jobs.js";
 import { METRICS } from "./metrics.js";
 import { dateRange, MAX_OUTPUT_ROWS } from "./validation.js";
 
-export const DIMENSIONS = ["overall", "install-source", "install-type", "os", "utm-source", "country", "app-version"];
+export const DIMENSIONS = [
+  "overall", "os", "app-version", "country", "install-source", "install-type",
+  "language", "enabled", "utm-campaign", "utm-content", "utm-medium",
+  "utm-source", "utm-term",
+];
 
 export function assertMetricSelection(metric, dimension = "overall") {
   if (!METRICS.includes(metric)) throw new Error("Unsupported metric: " + String(metric));
   if (!DIMENSIONS.includes(dimension)) throw new Error("Unsupported dimension: " + String(dimension));
-  if (!JOBS.some(job => (job.dimension || "overall") === dimension && job.metrics.includes(metric))) {
-    throw new Error("This metric and dimension combination is not supported by Chrome Web Store.");
-  }
+  // The API lists valid dimensions, but does not publish a complete
+  // metric/dimension compatibility matrix. Let Google validate each combination.
 }
 
 export async function queryMetrics(token, publisherId, itemId, metric, dimension, days, request = fetch) {
@@ -28,6 +30,7 @@ export async function queryMetrics(token, publisherId, itemId, metric, dimension
     url.searchParams.set("pageSize", "1000");
     if (pageToken) url.searchParams.set("pageToken", pageToken);
     const response = await request(url.toString(), {
+      method: "GET", redirect: "manual",
       headers: { Authorization: "Bearer " + token, Accept: "application/json" },
     });
     if (response.status === 401) {
