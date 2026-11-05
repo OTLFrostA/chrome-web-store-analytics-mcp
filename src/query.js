@@ -11,19 +11,20 @@ export const DIMENSIONS = [
 export function assertMetricSelection(metric, dimension = "overall") {
   if (!METRICS.includes(metric)) throw new Error("Unsupported metric: " + String(metric));
   if (!DIMENSIONS.includes(dimension)) throw new Error("Unsupported dimension: " + String(dimension));
-  // The API lists valid dimensions, but does not publish a complete
-  // metric/dimension compatibility matrix. Let Google validate each combination.
 }
 
-export async function queryMetrics(token, publisherId, itemId, metric, dimension, days, request = fetch) {
-  assertMetricSelection(metric, dimension);
-  const { from, to } = dateRange(days);
-  const rows = [];
+// The one Google API metrics parser used by both cron and live queries.
+// No client output cap is applied here: every fetched page must be persisted
+// before a higher layer returns a bounded response.
+export async function fetchMetricBatch(token, publisherId, itemId, job, days, request = fetch) {
+  const dimension = job.dimension || "overall";
+  for (const metric of job.metrics) assertMetricSelection(metric, dimension);
+  const {from,to} = dateRange(days), rows = [];
   let pageToken;
   for (let page = 0; page < 10; page++) {
     const url = new URL("https://chromewebstore.googleapis.com/v2/publishers/" +
       encodeURIComponent(publisherId) + "/items/" + encodeURIComponent(itemId) + ":queryMetrics");
-    url.searchParams.append("metrics", metric);
+    for (const metric of job.metrics) url.searchParams.append("metrics", metric);
     if (dimension !== "overall") url.searchParams.set("dimensions", dimension);
     addDate(url, "timeSpec.firstDate", from);
     addDate(url, "timeSpec.lastDate", to);
@@ -31,44 +32,57 @@ export async function queryMetrics(token, publisherId, itemId, metric, dimension
     if (pageToken) url.searchParams.set("pageToken", pageToken);
     const response = await request(url.toString(), {
       method: "GET", redirect: "manual",
-      headers: { Authorization: "Bearer " + token, Accept: "application/json" },
+      headers: {Authorization: "Bearer " + token, Accept: "application/json"},
     });
     if (response.status === 401) {
-      throw new Error("Google rejected your authorization (HTTP 401). Reconnect the Google account that owns your Chrome Web Store extensions.");
+      throw new Error("Google rejected your authorization (HTTP 401). Reconnect your Google account.");
     }
     if (response.status === 403 || response.status === 404) {
       throw new Error("Google could not access analytics for this extension (HTTP " + response.status +
-        "). Check the Publisher ID and signed-in Google account. Open https://chrome.google.com/webstore/developer/dashboard, select the correct publisher, then go to Publisher > Settings. Paste the Publisher ID or that page URL and try again.");
+        "). Check the Publisher ID and signed-in Google account.");
     }
     if (!response.ok) throw new Error("Chrome Web Store metrics request failed (HTTP " + response.status + ").");
-    const data = await response.json();
-    if (!Array.isArray(data.metricRows || [])) throw new Error("Google returned an invalid metrics response.");
-    rows.push(...(data.metricRows || []));
-    if (!data.nextPageToken) {
-      const compact = rows.map(row => {
-        const m = (row.metricValues || []).find(value => value.metric === metric);
-        if (!m || !row.date) return null;
-        const year = String(row.date.year);
-        const month = String(row.date.month).padStart(2, "0");
-        const day = String(row.date.day).padStart(2, "0");
-        return {
-          date: year + "-" + month + "-" + day,
-          ...(dimension === "overall" ? {} : { dimensionValue: row.dimensionValues?.[0] ?? null }),
-          value: Number(m.value ?? 0),
-          ...(m.uniqueUserCount === undefined ? {} : { uniqueUserCount: Number(m.uniqueUserCount) }),
-        };
-      }).filter(Boolean);
-      return {
-        publisherId, itemId, metric, dimension, from, to,
-        totalRows: compact.length,
-        truncated: compact.length > MAX_OUTPUT_ROWS,
-        rows: compact.slice(0, MAX_OUTPUT_ROWS),
-        ...(compact.length > MAX_OUTPUT_ROWS ? {
-          note: "Too many rows to display. Reduce days or choose the overall dimension.",
-        } : {}),
-      };
+    let data;
+    try {data = await response.json();} catch {throw new Error("Google returned invalid metrics JSON.");}
+    if (!data || !Array.isArray(data.metricRows ?? []) ||
+        (data.nextPageToken !== undefined && typeof data.nextPageToken !== "string")) {
+      throw new Error("Google returned an invalid metrics response.");
     }
+    for (const row of data.metricRows ?? []) {
+      if (!row.date || !Array.isArray(row.metricValues)) continue;
+      const date = String(row.date.year) + "-" + String(row.date.month).padStart(2,"0") + "-" +
+        String(row.date.day).padStart(2,"0");
+      const rawDimension = dimension === "overall" ? "" : (row.dimensionValues?.[0] ?? "");
+      const dimensionValue = typeof rawDimension === "string" ? rawDimension : JSON.stringify(rawDimension);
+      for (const value of row.metricValues) {
+        if (!job.metrics.includes(value.metric)) continue;
+        const amount = Number(value.value);
+        if (!Number.isFinite(amount)) throw new Error("Invalid Google metric value.");
+        const uniqueUserCount = value.uniqueUserCount === undefined ? undefined : Number(value.uniqueUserCount);
+        if (uniqueUserCount !== undefined && !Number.isFinite(uniqueUserCount)) {
+          throw new Error("Invalid Google metric unique user count.");
+        }
+        rows.push({date,metric:value.metric,dimension,dimensionValue,value:amount,
+          ...(uniqueUserCount===undefined?{}:{uniqueUserCount})});
+      }
+    }
+    if (!data.nextPageToken) return rows;
     pageToken = data.nextPageToken;
   }
-  throw new Error("Too many result pages. Try fewer days.");
+  throw new Error("Too many Google metrics pages. Try a shorter time period.");
+}
+
+// Retained for connection validation and test compatibility. External MCP
+// queries go through queryAndStoreMetrics in query-service.js instead.
+export async function queryMetrics(token, publisherId, itemId, metric, dimension, days, request = fetch) {
+  const rows = await fetchMetricBatch(token,publisherId,itemId,
+    {dimension:dimension==="overall"?null:dimension,metrics:[metric]},days,request);
+  const {from,to} = dateRange(days);
+  return {publisherId,itemId,metric,dimension,from,to,totalRows:rows.length,
+    truncated:rows.length>MAX_OUTPUT_ROWS,
+    rows:rows.slice(0,MAX_OUTPUT_ROWS).map(row=>({
+      date:row.date,...(dimension==="overall"?{}:{dimensionValue:row.dimensionValue}),
+      value:row.value,...(row.uniqueUserCount===undefined?{}:{uniqueUserCount:row.uniqueUserCount}),
+    })),
+    ...(rows.length>MAX_OUTPUT_ROWS?{note:"Too many rows to display. Reduce days or choose an overall dimension."}:{})};
 }

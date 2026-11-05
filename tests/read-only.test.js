@@ -128,7 +128,7 @@ test("analytics passes newly supported dimensions to Google and sanitizes errors
     });
 });
 
-test("all four official v2 GET endpoints are registered as read-only MCP tools", () => {
+test("all four external Google GET endpoints persist before returning through MCP", () => {
   const source = readFileSync(new URL("../src/server.js", import.meta.url), "utf8");
   for (const name of ["query_metrics", "fetch_reviews", "get_extension_status",
     "get_rating_summary"]) {
@@ -136,6 +136,6 @@ test("all four official v2 GET endpoints are registered as read-only MCP tools",
     assert.ok(start >= 0, "missing MCP tool " + name);
     const configurationEnd = source.indexOf("}, async", start);
     assert.ok(configurationEnd > start, "missing tool handler " + name);
-    assert.match(source.slice(start, configurationEnd), /readOnlyHint: true/);
+    assert.match(source.slice(start, configurationEnd), /readOnlyHint: false/);
   }
 });

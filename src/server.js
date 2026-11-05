@@ -4,13 +4,14 @@ import { createMcpHandler, getMcpAuthContext } from "agents/mcp/server";
 import { z } from "zod";
 import { parseStoreUrl, parsePublisherId } from "./validation.js";
 import { listUserExtensions, saveUserExtension, removeUserExtension, selectUserExtension } from "./storage.js";
-import { googleFetch } from "./rate-limit.js";
 import { disconnectGoogleAccount } from "./account-service.js";
 import { oauthOptions } from "./oauth-options.js";
 import { getOAuthApi } from "@cloudflare/workers-oauth-provider";
-import { queryMetrics, DIMENSIONS } from "./query.js";
-import { fetchExtensionStatus, getRatingSummary } from "./read-only.js";
-import { refreshGoogleAccessToken } from "./google.js";
+import { DIMENSIONS } from "./query.js";
+import { googleQueryAccess, queryAndStoreMetrics, queryAndStoreStatus,
+  queryAndStoreRating, queryAndStoreReviewPage, queryAndStoreWebStoreRank } from "./query-service.js";
+import { getRatingHistory, getStatusEvents, getWebStoreSearchSnapshots,
+  getGoogleSearchSnapshots } from "./collection/snapshots.js";
 import { METRICS } from "./metrics.js";
 import { SETUP_RESOURCE_URI, SETUP_MIME_TYPE, SETUP_HTML } from "./setup-ui.js";
 import { COLLECTORS, enableDailyCollection, disableDailyCollection, runCollection, updateKeywords, pollPendingBrightDataRankings } from "./collection/runner.js";
@@ -18,8 +19,8 @@ import { saveBrightDataKey, hasBrightDataKey, deleteBrightDataKey } from "./coll
 import { verifyBrightDataKey, getGoogleSearchBudget, setGoogleSearchMonthlyLimit, updateGoogleSearchKeywords, listGoogleSearchKeywords, getGoogleSearchHistory } from "./collection/brightdata.js";
 import { BRIGHTDATA_SETTINGS_URI, BRIGHTDATA_SETTINGS_MIME, BRIGHTDATA_SETTINGS_HTML } from "./brightdata-setup-ui.js";
 import { readKeywordSettings, saveKeywordSettings } from "./collection/keyword-settings.js";
-import { getReviewSettings, setReviewSettings, getSavedReviews, fetchReviewPage } from "./collection/reviews.js";
-import { saveQueryMetrics, getMetricHistory, getRankingHistory, deleteExtensionHistory } from "./collection/history.js";
+import { getReviewSettings, setReviewSettings, getSavedReviews } from "./collection/reviews.js";
+import { getMetricHistory, getRankingHistory, deleteExtensionHistory } from "./collection/history.js";
 
 const securitySchemes = [{ type: "oauth2", scopes: ["cws:read"] }];
 
@@ -170,9 +171,12 @@ function createServer() {
     const props = authProps();
     const parsed = parseStoreUrl(storeUrl);
     const id = parsePublisherId(publisherId);
-    const request = googleFetch(env.GOOGLE_API_RATE_LIMITER, props.googleSub);
-    const token = await refreshGoogleAccessToken(env, props.googleRefreshToken, request);
-    await queryMetrics(token, id, parsed.itemId, "installs", "overall", 2, request);
+    const access = await googleQueryAccess({env,googleSub:props.googleSub,refreshToken:props.googleRefreshToken});
+    await queryAndStoreMetrics({
+      db:env.MCP_DB,googleSub:props.googleSub,
+      item:{publisherId:id,itemId:parsed.itemId},metric:"installs",dimension:"overall",
+      days:2,token:access.token,request:access.request,
+    });
     await saveUserExtension(env.MCP_DB, props.googleSub, { itemId: parsed.itemId, publisherId: id, storeUrl: parsed.storeUrl });
     return result({ connected: true, publisherId: id, itemId: parsed.itemId, storeUrl: parsed.storeUrl });
   }));
@@ -186,19 +190,17 @@ function createServer() {
       dimension: z.enum(DIMENSIONS).default("overall").describe("Breakdown, or overall for all users"),
       days: z.number().int().min(1).max(90).default(14).describe("Number of complete UTC days, ending yesterday (max 90)"),
     },
-    annotations: { readOnlyHint: true, destructiveHint: false, openWorldHint: true },
+    annotations: { readOnlyHint: false, destructiveHint: false, openWorldHint: true },
     securitySchemes,
   }, async ({ itemId, metric, dimension, days }) => withErrors(async () => {
     const props = authProps();
     const extensions = await userExtensions(props.googleSub);
     const chosen = selectUserExtension(extensions, itemId);
-    const request = googleFetch(env.GOOGLE_API_RATE_LIMITER, props.googleSub);
-    const token = await refreshGoogleAccessToken(env, props.googleRefreshToken, request);
-    const data = await queryMetrics(token, chosen.publisherId, chosen.itemId, metric, dimension, days, request);
-    const subscription = await env.MCP_DB.prepare('SELECT enabled FROM collector_subscriptions WHERE google_sub=?')
-      .bind(props.googleSub).first();
-    if (subscription?.enabled) await saveQueryMetrics(env.MCP_DB, props.googleSub, data);
-    return result(data);
+    const access = await googleQueryAccess({env,googleSub:props.googleSub,refreshToken:props.googleRefreshToken});
+    return result(await queryAndStoreMetrics({
+      db:env.MCP_DB,googleSub:props.googleSub,item:chosen,metric,dimension,days,
+      token:access.token,request:access.request,
+    }));
   }));
 
   server.registerTool("get_extension_status", {
@@ -207,14 +209,14 @@ function createServer() {
     inputSchema: {
       itemId: z.string().optional().describe("Extension ID; omit only when exactly one is connected"),
     },
-    annotations: { readOnlyHint: true, destructiveHint: false, openWorldHint: true },
+    annotations: { readOnlyHint: false, destructiveHint: false, openWorldHint: true },
     securitySchemes,
   }, async ({ itemId }) => withErrors(async () => {
     const props = authProps();
     const chosen = selectUserExtension(await userExtensions(props.googleSub), itemId);
-    const request = googleFetch(env.GOOGLE_API_RATE_LIMITER, props.googleSub);
-    const token = await refreshGoogleAccessToken(env, props.googleRefreshToken, request);
-    return result(await fetchExtensionStatus(token, chosen.publisherId, chosen.itemId, request));
+    const access = await googleQueryAccess({env,googleSub:props.googleSub,refreshToken:props.googleRefreshToken});
+    return result(await queryAndStoreStatus({db:env.MCP_DB,googleSub:props.googleSub,
+      item:chosen,token:access.token,request:access.request}));
   }));
 
   server.registerTool("get_rating_summary", {
@@ -223,14 +225,14 @@ function createServer() {
     inputSchema: {
       itemId: z.string().optional().describe("Extension ID; omit only when exactly one is connected"),
     },
-    annotations: { readOnlyHint: true, destructiveHint: false, openWorldHint: true },
+    annotations: { readOnlyHint: false, destructiveHint: false, openWorldHint: true },
     securitySchemes,
   }, async ({ itemId }) => withErrors(async () => {
     const props = authProps();
     const chosen = selectUserExtension(await userExtensions(props.googleSub), itemId);
-    const request = googleFetch(env.GOOGLE_API_RATE_LIMITER, props.googleSub);
-    const token = await refreshGoogleAccessToken(env, props.googleRefreshToken, request);
-    return result(await getRatingSummary(token, chosen.publisherId, chosen.itemId, request));
+    const access = await googleQueryAccess({env,googleSub:props.googleSub,refreshToken:props.googleRefreshToken});
+    return result(await queryAndStoreRating({db:env.MCP_DB,googleSub:props.googleSub,
+      item:chosen,token:access.token,request:access.request}));
   }));
 
   server.registerTool("fetch_reviews", {
@@ -247,26 +249,24 @@ function createServer() {
         "create_time desc",
       ]).default("createTime desc").describe("Google review sort order; reuse returned orderBy while paging"),
     },
-    annotations: { readOnlyHint: true, destructiveHint: false, openWorldHint: true },
+    annotations: { readOnlyHint: false, destructiveHint: false, openWorldHint: true },
     securitySchemes,
   }, async ({ itemId, pageSize, pageToken, rating, orderBy }) => withErrors(async () => {
     const props = authProps();
     const chosen = selectUserExtension(await userExtensions(props.googleSub), itemId);
-    const request = googleFetch(env.GOOGLE_API_RATE_LIMITER, props.googleSub);
-    const token = await refreshGoogleAccessToken(env, props.googleRefreshToken, request);
+    const access = await googleQueryAccess({env,googleSub:props.googleSub,refreshToken:props.googleRefreshToken});
     let effectiveOrder = orderBy;
     let page;
-    try {
-      page = await fetchReviewPage(token, chosen.publisherId, chosen.itemId,
-        pageToken, request, orderBy, { pageSize, rating });
-    } catch (error) {
-      // Google installations have differed on the spelling of createTime.
-      // Do not switch orders on later pages: their tokens belong to the original sort.
+    const read = selectedOrder => queryAndStoreReviewPage({
+      db:env.MCP_DB,googleSub:props.googleSub,item:chosen,
+      token:access.token,pageToken,request:access.request,
+      orderBy:selectedOrder,pageSize,rating,
+    });
+    try { page=await read(orderBy); } catch (error) {
       if (pageToken || orderBy !== "createTime desc" ||
           !(error instanceof Error) || !/HTTP 400_invalid_order/.test(error.message)) throw error;
       effectiveOrder = "create_time desc";
-      page = await fetchReviewPage(token, chosen.publisherId, chosen.itemId,
-        pageToken, request, effectiveOrder, { pageSize, rating });
+      page = await read(effectiveOrder);
     }
     return result({ publisherId: chosen.publisherId, itemId: chosen.itemId,
       orderBy: effectiveOrder, rating: rating ?? null, ...page });
@@ -491,6 +491,58 @@ function createServer() {
     const props = authProps();
     const item = selectUserExtension(await userExtensions(props.googleSub), itemId);
     return result({ itemId: item.itemId, rows: await getMetricHistory(env.MCP_DB, props.googleSub, item.itemId, metric, dimension, days) });
+  }));
+
+  server.registerTool("query_webstore_ranking", {
+    title: "Search Chrome Web Store ranking and save results",
+    description: "Query current public Chrome Web Store search rankings for a keyword; save the complete ordered result list and this extension's rank in account-scoped history. The underlying Web Store search endpoint is unofficial.",
+    inputSchema: { itemId:z.string().optional(),
+      keyword:z.string().min(1).max(120),locale:z.string().default("en-US") },
+    annotations: { readOnlyHint:false,destructiveHint:false,openWorldHint:true },securitySchemes,
+  },async ({itemId,keyword,locale})=>withErrors(async()=>{
+    const props=authProps();
+    const item=selectUserExtension(await userExtensions(props.googleSub),itemId);
+    return result({itemId:item.itemId,...(await queryAndStoreWebStoreRank({
+      db:env.MCP_DB,googleSub:props.googleSub,item,keyword,locale,
+    }))});
+  }));
+
+  server.registerTool("get_rating_history", {
+    title:"Read saved Chrome Web Store rating history",
+    description:"Read complete daily rating summaries from D1; does not call Google.",
+    inputSchema:{itemId:z.string().optional(),days:z.number().int().min(1).max(365).default(90)},
+    annotations:{readOnlyHint:true,destructiveHint:false,openWorldHint:false},securitySchemes,
+  },async ({itemId,days})=>withErrors(async()=>{
+    const props=authProps();
+    const item=selectUserExtension(await userExtensions(props.googleSub),itemId);
+    return result({itemId:item.itemId,history:await getRatingHistory(env.MCP_DB,props.googleSub,item.itemId,days)});
+  }));
+
+  server.registerTool("get_status_history", {
+    title:"Read saved publishing, review and policy status changes",
+    description:"Read only status transitions from D1, newest first. Does not call Google.",
+    inputSchema:{itemId:z.string().optional(),limit:z.number().int().min(1).max(100).default(30)},
+    annotations:{readOnlyHint:true,destructiveHint:false,openWorldHint:false},securitySchemes,
+  },async ({itemId,limit})=>withErrors(async()=>{
+    const props=authProps();
+    const item=selectUserExtension(await userExtensions(props.googleSub),itemId);
+    return result({itemId:item.itemId,events:await getStatusEvents(env.MCP_DB,props.googleSub,item.itemId,limit)});
+  }));
+
+  server.registerTool("get_search_snapshots", {
+    title:"Read saved full Web Store and Google search result snapshots",
+    description:"Read previously persisted keyword search results from D1 without any provider request. Google organic results are the full Bright Data records; this endpoint never exposes API keys.",
+    inputSchema:{itemId:z.string().optional(),source:z.enum(["webstore","google"]),
+      days:z.number().int().min(1).max(365).default(30),
+      limit:z.number().int().min(1).max(30).default(5)},
+    annotations:{readOnlyHint:true,destructiveHint:false,openWorldHint:false},securitySchemes,
+  },async ({itemId,source,days,limit})=>withErrors(async()=>{
+    const props=authProps();
+    const item=selectUserExtension(await userExtensions(props.googleSub),itemId);
+    const all=source==="webstore"
+      ? await getWebStoreSearchSnapshots(env.MCP_DB,props.googleSub,item.itemId,days)
+      : await getGoogleSearchSnapshots(env.MCP_DB,props.googleSub,item.itemId,days,limit);
+    return result({itemId:item.itemId,source,snapshots:all.slice(0,limit)});
   }));
 
   server.registerTool('get_ranking_history', {

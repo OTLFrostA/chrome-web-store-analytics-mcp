@@ -2,10 +2,11 @@ import test from 'node:test';
 import assert from 'node:assert/strict';
 import {DatabaseSync} from 'node:sqlite';
 import {readFileSync} from 'node:fs';
-import {fetchReviewPage, normalizeReview, collectReviews, saveReviewPage,
+import {fetchReviewPage, normalizeReview, saveReviewPage,
   getSavedReviews, getReviewSettings, setReviewSettings} from '../src/collection/reviews.js';
 import {deleteAccountHistory,deleteExtensionHistory} from '../src/collection/history.js';
 import {dueCollectorIds,runOneCollector} from '../src/collection/runner.js';
+import {collectAndStoreReviews as collectReviews} from '../src/query-service.js';
 
 const itemId='ldpbiafkgjlaooeplkiooljccpalpkgf';
 const publisherId='sample-publisher';
@@ -152,8 +153,8 @@ test('review fetch respects max pages, rejects repeated pagination and never tre
 });
 
 test('new review tool is independently scheduled at 9 AM Pacific, and disabled runs do not claim a day',async()=>{
-  assert.deepEqual(dueCollectorIds(Date.UTC(2026,10,4,17)),['cws-reviews']);
-  assert.deepEqual(dueCollectorIds(Date.UTC(2026,6,4,16)),['cws-reviews']);
+  assert.deepEqual(dueCollectorIds(Date.UTC(2026,10,4,17)),['cws-reviews','cws-metadata']);
+  assert.deepEqual(dueCollectorIds(Date.UTC(2026,6,4,16)),['cws-reviews','cws-metadata']);
   assert.deepEqual(dueCollectorIds(Date.UTC(2026,10,4,16)),
     ['cws-analytics','cws-ranking','google-search-ranking']);
   const {db,sqlite}=mockD1();

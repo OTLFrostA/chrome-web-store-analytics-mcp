@@ -41,24 +41,25 @@ export function publicPage(pathname) {
     "with read-only Chrome Web Store analytics scope. The Google ID, selected Publisher ID, extension ID, and public " +
     "extension URL are saved in a Cloudflare D1 database. OAuth grants and refresh tokens are held in protected " +
     "Cloudflare KV through the OAuth provider. Our service does not request permission to publish or edit extensions.</p>" +
-    "<h2>Use of analytics</h2>" +
-    "<p>We return on-demand metrics to your authenticated MCP client. If you enable daily collection, " +
-    "the service stores daily Chrome Web Store metrics and public search ranking history in account-scoped D1 records. " +
-    "Enabling daily collection also stores a separately encrypted Google refresh credential in Cloudflare KV, " +
-    "used only for background analytics retrieval. Private metrics are not shared with other accounts. " +
-    "The connected client may save returned statistics in chat history under its own policies.</p>" +
-    "<h2>Optional Google Search ranking and SerpAPI</h2>" +
-    "<p>Google organic search ranking via SerpAPI is opt-in. Each user supplies their own API key " +
-    "in a private settings form. We verify it against SerpAPI's Account API and store it encrypted " +
-    "with AES-GCM in Cloudflare KV under your Google account identity. No key is kept in D1 or " +
-    "shared with other users. Google Search phrases, per-user request budgets and ranking history " +
-    "are stored in account- and extension-scoped D1 records. SerpAPI receives your key and search " +
-    "queries when searches are performed. Your SerpAPI account controls billing and quotas; " +
-    "the service adds a conservative configurable monthly request limit and daily deduplication. " +
-    "You can remove the key separately while retaining historical ranks. No ranking search runs " +
-    "without your key and configured phrases.</p>" +
+    "<h2>On-demand and scheduled data collection</h2>" +
+    "<p>Every successful external data query stores useful results in account- and extension-scoped Cloudflare D1, " +
+    "even when daily collection is disabled. Saved data includes Chrome Web Store metrics, reviews (including " +
+    "reviewer display names and comments), rating summaries, publishing/status changes, and ranked search results. " +
+    "Some search records contain result URLs, titles and other fields supplied by the search provider. " +
+    "You can read this history through the MCP. Private data is not shared across Google accounts. " +
+    "The MCP client may store returned data in conversation history under its own policies.</p>" +
+    "<p>Optional daily collection uses a separate encrypted Google refresh credential in Cloudflare KV " +
+    "and periodically calls the same query-and-store services. Disabling the schedule stops periodic queries, " +
+    "but does not disable storage for future on-demand queries.</p>" +
+    "<h2>Optional Google organic search ranking</h2>" +
+    "<p>Google organic ranking is opt-in and uses each user's own Bright Data API token. " +
+    "The token is verified and stored encrypted with AES-GCM in Cloudflare KV, never in D1 or source control. " +
+    "Bright Data receives your token and selected queries; your account determines provider quotas and billing. " +
+    "We store selected keyword settings, request budgets, rank history and full returned search result records " +
+    "in account-scoped D1. A local configurable budget and daily deduplication limit billable requests. " +
+    "You can remove the Bright Data key independently while retaining historical results.</p>" +
     "<h2>Service providers and logs</h2>" +
-    "<p>Google supplies analytics and OAuth identity information. SerpAPI processes optional " +
+    "<p>Google supplies analytics and OAuth identity information. Bright Data processes optional " +
     "organic search queries and personal API key verification. Cloudflare hosts the Worker, database, OAuth " +
     "storage, and operational logs. These logs may contain request metadata, timestamps, error categories, and " +
     "HTTP statuses. We do not intentionally log OAuth credentials or full analytics responses. " +
@@ -66,7 +67,7 @@ export function publicPage(pathname) {
     "<h2>Controls</h2>" +
     "<p>You can disable daily collection at any time to remove the scheduled credential. Stored history " +
     "remains until you remove an extension or disconnect your Google account. " +
-    "You can remove individual extensions or your optional SerpAPI key in settings. " +
+    "You can remove individual extensions or your optional Bright Data key in settings. " +
     "The Disconnect Google account action " +
     "revokes upstream authorization, deletes all your linked extensions, and revokes your MCP sessions. " +
     "Google revocation may invalidate other authorizations associated with the same Google Cloud project. " +
