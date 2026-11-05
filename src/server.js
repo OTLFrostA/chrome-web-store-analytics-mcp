@@ -9,6 +9,7 @@ import { disconnectGoogleAccount } from "./account-service.js";
 import { oauthOptions } from "./oauth-options.js";
 import { getOAuthApi } from "@cloudflare/workers-oauth-provider";
 import { queryMetrics, DIMENSIONS } from "./query.js";
+import { fetchExtensionStatus, getRatingSummary } from "./read-only.js";
 import { refreshGoogleAccessToken } from "./google.js";
 import { METRICS } from "./metrics.js";
 import { SETUP_RESOURCE_URI, SETUP_MIME_TYPE, SETUP_HTML } from "./setup-ui.js";
@@ -17,7 +18,7 @@ import { saveBrightDataKey, hasBrightDataKey, deleteBrightDataKey } from "./coll
 import { verifyBrightDataKey, getGoogleSearchBudget, setGoogleSearchMonthlyLimit, updateGoogleSearchKeywords, listGoogleSearchKeywords, getGoogleSearchHistory } from "./collection/brightdata.js";
 import { BRIGHTDATA_SETTINGS_URI, BRIGHTDATA_SETTINGS_MIME, BRIGHTDATA_SETTINGS_HTML } from "./brightdata-setup-ui.js";
 import { readKeywordSettings, saveKeywordSettings } from "./collection/keyword-settings.js";
-import { getReviewSettings, setReviewSettings, getSavedReviews } from "./collection/reviews.js";
+import { getReviewSettings, setReviewSettings, getSavedReviews, fetchReviewPage } from "./collection/reviews.js";
 import { saveQueryMetrics, getMetricHistory, getRankingHistory, deleteExtensionHistory } from "./collection/history.js";
 
 const securitySchemes = [{ type: "oauth2", scopes: ["cws:read"] }];
@@ -198,6 +199,77 @@ function createServer() {
       .bind(props.googleSub).first();
     if (subscription?.enabled) await saveQueryMetrics(env.MCP_DB, props.googleSub, data);
     return result(data);
+  }));
+
+  server.registerTool("get_extension_status", {
+    title: "Read extension publishing and review status",
+    description: "Read official Chrome Web Store status for a connected extension: published and submitted revisions, version and rollout information, async upload state, and policy warnings. Does not publish or modify anything.",
+    inputSchema: {
+      itemId: z.string().optional().describe("Extension ID; omit only when exactly one is connected"),
+    },
+    annotations: { readOnlyHint: true, destructiveHint: false, openWorldHint: true },
+    securitySchemes,
+  }, async ({ itemId }) => withErrors(async () => {
+    const props = authProps();
+    const chosen = selectUserExtension(await userExtensions(props.googleSub), itemId);
+    const request = googleFetch(env.GOOGLE_API_RATE_LIMITER, props.googleSub);
+    const token = await refreshGoogleAccessToken(env, props.googleRefreshToken, request);
+    return result(await fetchExtensionStatus(token, chosen.publisherId, chosen.itemId, request));
+  }));
+
+  server.registerTool("get_rating_summary", {
+    title: "Read Chrome Web Store rating summary",
+    description: "Read the official average rating, total rating count, written review count, and 1–5 star distribution of a connected extension. Read-only and live from Google.",
+    inputSchema: {
+      itemId: z.string().optional().describe("Extension ID; omit only when exactly one is connected"),
+    },
+    annotations: { readOnlyHint: true, destructiveHint: false, openWorldHint: true },
+    securitySchemes,
+  }, async ({ itemId }) => withErrors(async () => {
+    const props = authProps();
+    const chosen = selectUserExtension(await userExtensions(props.googleSub), itemId);
+    const request = googleFetch(env.GOOGLE_API_RATE_LIMITER, props.googleSub);
+    const token = await refreshGoogleAccessToken(env, props.googleRefreshToken, request);
+    return result(await getRatingSummary(token, chosen.publisherId, chosen.itemId, request));
+  }));
+
+  server.registerTool("fetch_reviews", {
+    title: "Fetch live Chrome Web Store reviews",
+    description: "Read reviews directly from Google's official API, with pagination, optional star-rating filter and ordering. This does not require or change daily collection. Use get_saved_reviews for previously collected history.",
+    inputSchema: {
+      itemId: z.string().optional().describe("Extension ID; omit only when exactly one is connected"),
+      pageSize: z.number().int().min(1).max(200).default(50),
+      pageToken: z.string().min(1).max(4096).optional().describe("Continuation token from the previous page"),
+      rating: z.number().int().min(1).max(5).optional().describe("Only reviews with this star rating"),
+      orderBy: z.enum([
+        "createTime desc", "rating asc", "rating desc",
+        "rating asc, createTime desc", "rating desc, createTime desc",
+        "create_time desc",
+      ]).default("createTime desc").describe("Google review sort order; reuse returned orderBy while paging"),
+    },
+    annotations: { readOnlyHint: true, destructiveHint: false, openWorldHint: true },
+    securitySchemes,
+  }, async ({ itemId, pageSize, pageToken, rating, orderBy }) => withErrors(async () => {
+    const props = authProps();
+    const chosen = selectUserExtension(await userExtensions(props.googleSub), itemId);
+    const request = googleFetch(env.GOOGLE_API_RATE_LIMITER, props.googleSub);
+    const token = await refreshGoogleAccessToken(env, props.googleRefreshToken, request);
+    let effectiveOrder = orderBy;
+    let page;
+    try {
+      page = await fetchReviewPage(token, chosen.publisherId, chosen.itemId,
+        pageToken, request, orderBy, { pageSize, rating });
+    } catch (error) {
+      // Google installations have differed on the spelling of createTime.
+      // Do not switch orders on later pages: their tokens belong to the original sort.
+      if (pageToken || orderBy !== "createTime desc" ||
+          !(error instanceof Error) || !/HTTP 400_invalid_order/.test(error.message)) throw error;
+      effectiveOrder = "create_time desc";
+      page = await fetchReviewPage(token, chosen.publisherId, chosen.itemId,
+        pageToken, request, effectiveOrder, { pageSize, rating });
+    }
+    return result({ publisherId: chosen.publisherId, itemId: chosen.itemId,
+      orderBy: effectiveOrder, rating: rating ?? null, ...page });
   }));
 
   server.registerTool('set_brightdata_key', {
