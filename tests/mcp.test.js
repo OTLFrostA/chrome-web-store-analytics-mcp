@@ -56,11 +56,16 @@ test("UTC range excludes current day, has length exactly days, and caps it", () 
   assert.throws(() => dateRange(0));
 });
 
-test("metric/dimension pairs match collector-supported jobs", () => {
-  assert.doesNotThrow(() => assertMetricSelection("installs", "install-type"));
-  assert.doesNotThrow(() => assertMetricSelection("page-views", "utm-source"));
-  assert.throws(() => assertMetricSelection("page-views", "country"));
+test("query metrics accepts every documented dimension independently of scheduled jobs", () => {
+  for (const dimension of ["overall", "os", "app-version", "country",
+    "install-source", "install-type", "language", "enabled", "utm-campaign",
+    "utm-content", "utm-medium", "utm-source", "utm-term"]) {
+    assert.doesNotThrow(() => assertMetricSelection("installs", dimension));
+  }
+  // Google validates individual metric/dimension combinations on request.
+  assert.doesNotThrow(() => assertMetricSelection("page-views", "country"));
   assert.throws(() => assertMetricSelection("not-a-metric", "overall"));
+  assert.throws(() => assertMetricSelection("installs", "not-a-dimension"));
 });
 
 test("Google OAuth user IDs avoid the provider's reserved colon separator", () => {
