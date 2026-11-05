@@ -2,10 +2,11 @@ import test from 'node:test';
 import assert from 'node:assert/strict';
 import {DatabaseSync} from 'node:sqlite';
 import {readFileSync} from 'node:fs';
-import {fetchReviewPage, normalizeReview, collectReviews, saveReviewPage,
+import {fetchReviewPage, normalizeReview, saveReviewPage,
   getSavedReviews, getReviewSettings, setReviewSettings} from '../src/collection/reviews.js';
 import {deleteAccountHistory,deleteExtensionHistory} from '../src/collection/history.js';
 import {dueCollectorIds,runOneCollector} from '../src/collection/runner.js';
+import {collectAndStoreReviews as collectReviews} from '../src/query-service.js';
 
 const itemId='ldpbiafkgjlaooeplkiooljccpalpkgf';
 const publisherId='sample-publisher';
