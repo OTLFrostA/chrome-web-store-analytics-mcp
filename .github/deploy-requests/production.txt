@@ -1,5 +1,5 @@
 Deploy request: 2026-11-04
-Target version: 0.5.1
-Target source: 2c95a5d32b2ea1ceffcc4f73ea7105281e9c925d
-Reason: release complete Chrome Web Store v2 read-only MCP coverage (metrics, live reviews, extension status, rating summary).
-Requested by: repository owner.
+Target source: de82facc56b672cde8f113b5f0ceae2049a2dfd0
+Reason: Production release of unified fetch + persist Query Service, all CWS v2 readonly GET endpoints, Bright Data snapshots, CWS ranking snapshots, history MCP tools.
+Prerequisite: 0004_unified_queries.sql applied and verified on the production D1 database before deployment.
+Requested by: repository owner via ChatGPT.
