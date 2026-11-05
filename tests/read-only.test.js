@@ -131,6 +131,8 @@ test("all four official v2 GET endpoints are registered as read-only MCP tools",
     "get_rating_summary"]) {
     const start = source.indexOf('server.registerTool("' + name + '"');
     assert.ok(start >= 0, "missing MCP tool " + name);
-    assert.match(source.slice(start, start + 1100), /readOnlyHint: true/);
+    const configurationEnd = source.indexOf("}, async", start);
+    assert.ok(configurationEnd > start, "missing tool handler " + name);
+    assert.match(source.slice(start, configurationEnd), /readOnlyHint: true/);
   }
 });
