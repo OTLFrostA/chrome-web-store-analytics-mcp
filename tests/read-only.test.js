@@ -53,6 +53,9 @@ test("read-only endpoint rejects a mismatched linked extension or invalid JSON",
   await assert.rejects(fetchExtensionStatus("token", publisherId, itemId,
     async () => Response.json({ name: "publishers/wrong/items/" + itemId })),
     /does not match/);
+  await assert.rejects(fetchExtensionStatus("token", publisherId, itemId,
+    async () => Response.json({ itemId, warned: false })),
+    /does not match/);
   await assert.rejects(getRatingSummary("token", publisherId, itemId,
     async () => Response.json({ itemId: "another-item" })),
     /does not match/);
