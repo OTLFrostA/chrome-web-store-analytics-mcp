@@ -152,8 +152,8 @@ test('review fetch respects max pages, rejects repeated pagination and never tre
 });
 
 test('new review tool is independently scheduled at 9 AM Pacific, and disabled runs do not claim a day',async()=>{
-  assert.deepEqual(dueCollectorIds(Date.UTC(2026,10,4,17)),['cws-reviews']);
-  assert.deepEqual(dueCollectorIds(Date.UTC(2026,6,4,16)),['cws-reviews']);
+  assert.deepEqual(dueCollectorIds(Date.UTC(2026,10,4,17)),['cws-reviews','cws-metadata']);
+  assert.deepEqual(dueCollectorIds(Date.UTC(2026,6,4,16)),['cws-reviews','cws-metadata']);
   assert.deepEqual(dueCollectorIds(Date.UTC(2026,10,4,16)),
     ['cws-analytics','cws-ranking','google-search-ranking']);
   const {db,sqlite}=mockD1();
