@@ -493,6 +493,58 @@ function createServer() {
     return result({ itemId: item.itemId, rows: await getMetricHistory(env.MCP_DB, props.googleSub, item.itemId, metric, dimension, days) });
   }));
 
+  server.registerTool("query_webstore_ranking", {
+    title: "Search Chrome Web Store ranking and save results",
+    description: "Query current public Chrome Web Store search rankings for a keyword; save the complete ordered result list and this extension's rank in account-scoped history. The underlying Web Store search endpoint is unofficial.",
+    inputSchema: { itemId:z.string().optional(),
+      keyword:z.string().min(1).max(120),locale:z.string().default("en-US") },
+    annotations: { readOnlyHint:false,destructiveHint:false,openWorldHint:true },securitySchemes,
+  },async ({itemId,keyword,locale})=>withErrors(async()=>{
+    const props=authProps();
+    const item=selectUserExtension(await userExtensions(props.googleSub),itemId);
+    return result({itemId:item.itemId,...(await queryAndStoreWebStoreRank({
+      db:env.MCP_DB,googleSub:props.googleSub,item,keyword,locale,
+    }))});
+  }));
+
+  server.registerTool("get_rating_history", {
+    title:"Read saved Chrome Web Store rating history",
+    description:"Read complete daily rating summaries from D1; does not call Google.",
+    inputSchema:{itemId:z.string().optional(),days:z.number().int().min(1).max(365).default(90)},
+    annotations:{readOnlyHint:true,destructiveHint:false,openWorldHint:false},securitySchemes,
+  },async ({itemId,days})=>withErrors(async()=>{
+    const props=authProps();
+    const item=selectUserExtension(await userExtensions(props.googleSub),itemId);
+    return result({itemId:item.itemId,history:await getRatingHistory(env.MCP_DB,props.googleSub,item.itemId,days)});
+  }));
+
+  server.registerTool("get_status_history", {
+    title:"Read saved publishing, review and policy status changes",
+    description:"Read only status transitions from D1, newest first. Does not call Google.",
+    inputSchema:{itemId:z.string().optional(),limit:z.number().int().min(1).max(100).default(30)},
+    annotations:{readOnlyHint:true,destructiveHint:false,openWorldHint:false},securitySchemes,
+  },async ({itemId,limit})=>withErrors(async()=>{
+    const props=authProps();
+    const item=selectUserExtension(await userExtensions(props.googleSub),itemId);
+    return result({itemId:item.itemId,events:await getStatusEvents(env.MCP_DB,props.googleSub,item.itemId,limit)});
+  }));
+
+  server.registerTool("get_search_snapshots", {
+    title:"Read saved full Web Store and Google search result snapshots",
+    description:"Read previously persisted keyword search results from D1 without any provider request. Google organic results are the full Bright Data records; this endpoint never exposes API keys.",
+    inputSchema:{itemId:z.string().optional(),source:z.enum(["webstore","google"]),
+      days:z.number().int().min(1).max(365).default(30),
+      limit:z.number().int().min(1).max(30).default(5)},
+    annotations:{readOnlyHint:true,destructiveHint:false,openWorldHint:false},securitySchemes,
+  },async ({itemId,source,days,limit})=>withErrors(async()=>{
+    const props=authProps();
+    const item=selectUserExtension(await userExtensions(props.googleSub),itemId);
+    const all=source==="webstore"
+      ? await getWebStoreSearchSnapshots(env.MCP_DB,props.googleSub,item.itemId,days)
+      : await getGoogleSearchSnapshots(env.MCP_DB,props.googleSub,item.itemId,days,limit);
+    return result({itemId:item.itemId,source,snapshots:all.slice(0,limit)});
+  }));
+
   server.registerTool('get_ranking_history', {
     title: 'Read saved CWS search keyword ranks',
     description: 'Return Chrome Web Store ranking history for a linked extension, including missing ranks outside the inspected top results.',
