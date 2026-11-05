@@ -1,6 +1,7 @@
 // Account-scoped Google organic ranking via Bright Data's async "Google SERP - 100 Results" dataset.
 // Each connected Google user supplies their own API key; no shared credentials or default keywords.
 import { localDay } from './time.js';
+import { saveGoogleSearchSnapshots } from './snapshots.js';
 
 const ORIGIN = 'https://api.brightdata.com';
 const DATASET_ID = 'gd_mfz5x93lmsjjjylob';
@@ -309,6 +310,21 @@ export async function pollBrightDataRun({env,googleSub,itemId,runId,apiKey,reque
     }
     try {results = parseBrightDataSnapshot(payload,job.keywords,itemId);}
     catch {results=job.keywords.map(entry=>({entry,status:'error',errorCode:'invalid_snapshot_shape'}));}
+    // Save every returned keyword record, including the full organic result
+    // list, before marking this asynchronous query as complete.
+    const records=snapshotRecords(payload);
+    if (records) {
+      const byTerm=new Map();
+      for (const record of records) {
+        const term=rowKeyword(record);
+        if (term && !byTerm.has(term)) byTerm.set(term,record);
+      }
+      const snapshots=job.keywords.flatMap(entry=>{
+        const record=byTerm.get(entry.keyword.toLowerCase());
+        return record?[{keyword:entry.keyword,market:entry.market,device:entry.device,payload:record}]:[];
+      });
+      await saveGoogleSearchSnapshots(env.MCP_DB,googleSub,itemId,job.date,job.snapshotId,snapshots);
+    }
   } else if (state.status === 'failed') {
     results=job.keywords.map(entry=>({entry,status:'error',errorCode:'provider_failed'}));
   } else return {runId,status:'pending',reason:'Provider status unknown.'};
