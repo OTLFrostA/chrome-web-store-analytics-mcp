@@ -18,8 +18,12 @@ Explore your Chrome extension's analytics, ratings, reviews, publishing status, 
 - “Fetch the latest reviews and summarize common complaints.”
 - “What version is published, is another revision pending review, and are there policy warnings?”
 - “Show my average rating and 1–5 star rating breakdown.”
+- “How did my rating and publishing status change over the past month?”
+- “Show the saved Google Search results for my monitored keywords.”
 - “Track these Chrome Web Store search keywords for my extension: …”
 - “Enable daily collection and show my historical metrics and rankings.”
+
+Every successful external query saves its useful results to account-scoped history, whether you query manually or enable Cron. Removing a linked extension clears its saved history.
 
 Analytics and reviews use Google's official Chrome Web Store API. Metrics can lag and the API provides up to **90 complete days** per live query. Chrome Web Store keyword ranking uses public search results, not an official ranking API. Optional **Google organic search** ranking uses your own [Bright Data](https://brightdata.com/) API key; you can configure it privately through the MCP.
 
