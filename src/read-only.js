@@ -26,11 +26,11 @@ async function readItem(token, publisherId, itemId, suffix, request = fetch) {
     throw new Error("Google returned an invalid Chrome Web Store response.");
   }
   const expectedName = resource + (suffix === ":fetchStatus" ? "" : "/ratingSummary");
-  if ((data.name !== undefined && data.name !== expectedName) ||
+  if (data.name !== expectedName ||
       (data.itemId !== undefined && data.itemId !== itemId)) {
     throw new Error("Google returned a resource that does not match the linked extension.");
   }
-  return { publisherId, itemId, ...data };
+  return { ...data, publisherId, itemId };
 }
 
 // The official v2 status response includes published/submitted revisions, rollout
