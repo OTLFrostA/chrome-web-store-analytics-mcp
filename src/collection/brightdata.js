@@ -283,17 +283,24 @@ export function parseBrightDataSnapshot(payload, keywords, itemId) {
 }
 
 export async function pollBrightDataRun({env,googleSub,itemId,runId,apiKey,request=fetch}) {
+  // Keep provider errors, database SQL and private credentials out of MCP responses.
+  // Expose only the stage of a failed poll so persistent jobs can be diagnosed.
+  let stage = 'load_metadata';
+  try {
   const job = await env.OAUTH_KV.get(JOB_PREFIX + runId,'json');
   if (!job) return {runId,status:'pending',reason:'Snapshot metadata is not available yet.'};
+  stage = 'validate_metadata';
   if (job.googleSub!==googleSub || job.itemId!==itemId ||
       !Array.isArray(job.keywords) || !SNAPSHOT_ID.test(job.snapshotId)) {
     throw new Error('Invalid account-bound Bright Data snapshot metadata.');
   }
   const headers = apiHeaders(apiKey);
+  stage = 'progress_request';
   const progress = await request(ORIGIN + '/datasets/v3/progress/' + job.snapshotId,
     {headers,redirect:'manual'});
   if (!progress.ok) return {runId,status:'pending',reason:'Progress check failed (HTTP ' +
     progress.status + ').'};
+  stage = 'progress_parse';
   let state;
   try {state = await progress.json();} catch {return {runId,status:'pending',reason:'Invalid progress response.'};}
   if (state.status === 'starting' || state.status === 'running') {
@@ -301,9 +308,11 @@ export async function pollBrightDataRun({env,googleSub,itemId,runId,apiKey,reque
   }
   let results;
   if (state.status === 'ready') {
+    stage = 'snapshot_download';
     const download = await request(ORIGIN + '/datasets/v3/snapshot/' +
       job.snapshotId + '?format=json', {headers,redirect:'manual'});
     if (!download.ok) return {runId,status:'pending',reason:'Snapshot not downloadable yet.'};
+    stage = 'snapshot_parse';
     let payload;
     try {payload = await download.json();} catch {
       return {runId,status:'pending',reason:'Snapshot JSON not ready.'};
@@ -323,11 +332,13 @@ export async function pollBrightDataRun({env,googleSub,itemId,runId,apiKey,reque
         const record=byTerm.get(entry.keyword.toLowerCase());
         return record?[{keyword:entry.keyword,market:entry.market,device:entry.device,payload:record}]:[];
       });
+      stage = 'snapshot_persist';
       await saveGoogleSearchSnapshots(env.MCP_DB,googleSub,itemId,job.date,job.snapshotId,snapshots);
     }
   } else if (state.status === 'failed') {
     results=job.keywords.map(entry=>({entry,status:'error',errorCode:'provider_failed'}));
   } else return {runId,status:'pending',reason:'Provider status unknown.'};
+  stage = 'history_persist';
   let written=0,found=0,failed=0;
   for (const row of results) {
     const result = await finishRow(env.MCP_DB,googleSub,itemId,job.date,row.entry,row);
@@ -336,10 +347,15 @@ export async function pollBrightDataRun({env,googleSub,itemId,runId,apiKey,reque
     if (row.status==='error') failed++;
   }
   const status = failed?'failed':'succeeded';
+  stage = 'finalize_run';
   await env.MCP_DB.prepare('UPDATE collector_runs SET status=?,rows_written=?,error_message=?,' +
     'finished_at=CURRENT_TIMESTAMP WHERE run_id=? AND google_sub=? AND item_id=? AND status=?')
     .bind(status,written,failed?'Bright Data returned incomplete or failed results.':null,
       runId,googleSub,itemId,'running').run();
+  stage = 'metadata_cleanup';
   await env.OAUTH_KV.delete(JOB_PREFIX + runId);
   return {runId,status,rowsWritten:written,found,failed};
+  } catch (error) {
+    throw new Error('brightdata_poll_failed_' + stage, {cause: error});
+  }
 }
