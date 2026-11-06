@@ -23,7 +23,7 @@ function mockD1() {
   sqlite.exec(readFileSync(new URL('../schema.sql',import.meta.url),'utf8'));
   sqlite.exec(readFileSync(new URL('../migrations/0001_collectors.sql',import.meta.url),'utf8'));
   sqlite.exec(readFileSync(new URL('../migrations/0002_google_search.sql',import.meta.url),'utf8'));
-  sqlite.exec(readFileSync(new URL('../migrations/0004_unified_queries.sql',import.meta.url),'utf8'));
+  sqlite.exec(readFileSync(new URL('../migrations/0004_unified_queries.sql'),migrations/0005_google_search_snapshot_chunks.sql'',import.meta.url),'utf8'));
   sqlite.prepare('INSERT INTO user_extensions (google_sub,item_id,publisher_id,store_url) VALUES (?,?,?,?)').run('alice',firstId,'publisher-alice','https://example.test/extension');
   const db={
     prepare(sql){return {bind(...args){
