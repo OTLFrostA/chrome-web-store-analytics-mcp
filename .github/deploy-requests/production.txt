@@ -1,4 +1,4 @@
-Deploy request: 2026-11-06 (phase 2)
-Target source: 640676cb843415a5195909913235004f15d47009
-Reason: Safe persistence failure diagnostics for pending Bright Data snapshots. No new scraping or credentials exposed.
+Deploy request: 2026-11-06 (Bright Data snapshot hotfix)
+Target source: 4abe53ed22e848a89f332031e29effcd90883e1c
+Reason: Fix oversize Bright Data snapshot persistence with account-scoped D1 chunks. 0005_google_search_snapshot_chunks.sql pre-applied and verified in production D1. Reuse previously submitted snapshots without new Bright Data triggers.
 Requested by: repository owner via ChatGPT.
