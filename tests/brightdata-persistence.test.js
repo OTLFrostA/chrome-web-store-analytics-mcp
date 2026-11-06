@@ -3,6 +3,7 @@ import assert from "node:assert/strict";
 import {DatabaseSync} from "node:sqlite";
 import {readFileSync} from "node:fs";
 import {submitBrightDataRankings,pollBrightDataRun} from "../src/collection/brightdata.js";
+import {saveGoogleSearchSnapshots,getGoogleSearchSnapshots} from "../src/collection/snapshots.js";
 
 const itemId="ldpbiafkgjlaooeplkiooljccpalpkgf";
 const now=Date.UTC(2026,10,4,16);
@@ -11,7 +12,7 @@ const runId="test-brightdata-e2e";
 function setup(){
   const sqlite=new DatabaseSync(":memory:");
   for(const path of ["schema.sql","migrations/0001_collectors.sql",
-    "migrations/0002_google_search.sql","migrations/0004_unified_queries.sql"]){
+    "migrations/0002_google_search.sql","migrations/0004_unified_queries.sql","migrations/0005_google_search_snapshot_chunks.sql"]){
     sqlite.exec(readFileSync(new URL("../"+path,import.meta.url),"utf8"));
   }
   sqlite.prepare("INSERT INTO user_extensions (google_sub,item_id,publisher_id,store_url) VALUES (?,?,?,?)")
@@ -72,4 +73,46 @@ test("Bright Data only acknowledges a result after the entire organic record is 
     assert.equal(sqlite.prepare("SELECT status FROM collector_runs").get().status,"succeeded");
     assert.equal(kvValues.size,0);
   }finally{sqlite.close();}
+});
+
+
+test("oversize Bright Data records are preserved losslessly, with Unicode-safe chunks and retry",async()=>{
+  const {db,sqlite}=setup();
+  try {
+    const giant={keyword:"gemini exporter",organic:[{position:1,
+      link:"https://chromewebstore.google.com/detail/"+itemId,
+      description:"🌟搜索记录".repeat(175_000)}],metadata:{complete:true}};
+    const entry={keyword:"gemini exporter",market:"us/en",device:"desktop",payload:giant};
+    const write=()=>saveGoogleSearchSnapshots(db,"alice",itemId,"2026-11-04","sd_testbig",[entry]);
+    assert.equal(await write(),1);
+    const marker=sqlite.prepare("SELECT payload_json AS p FROM google_search_snapshots").get().p;
+    assert.ok(JSON.parse(marker).__cws_chunked_snapshot_v1>1);
+    const stored=await getGoogleSearchSnapshots(db,"alice",itemId,30,10);
+    assert.deepEqual(stored[0].payload,giant);
+    assert.equal(await write(),1); // retries upsert the same chunks
+    const count=sqlite.prepare("SELECT COUNT(*) AS n FROM google_search_snapshot_chunks").get().n;
+    assert.equal(count,JSON.parse(marker).__cws_chunked_snapshot_v1);
+    sqlite.prepare("DELETE FROM google_search_snapshot_chunks WHERE part_index=0").run();
+    await assert.rejects(getGoogleSearchSnapshots(db,"alice",itemId,30,10),/chunks are incomplete/);
+    assert.equal(await write(),1);
+    assert.deepEqual((await getGoogleSearchSnapshots(db,"alice",itemId,30,10))[0].payload,giant);
+  } finally {sqlite.close();}
+});
+
+test("interrupted chunk writes do not publish a completed Bright Data snapshot",async()=>{
+  const {db,sqlite}=setup();
+  try {
+    const record={keyword:"gemini exporter",market:"us/en",device:"desktop",
+      payload:{keyword:"gemini exporter",organic:[{title:"x".repeat(2_000_000)}]}};
+    let batches=0;
+    const dbFail={...db,async batch(stmts){
+      if(++batches===2) throw new Error("temporary D1 outage");
+      return db.batch(stmts);
+    }};
+    await assert.rejects(saveGoogleSearchSnapshots(dbFail,"alice",itemId,"2026-11-04","sd_interrupted",[record]),
+      /temporary D1 outage/);
+    assert.equal(sqlite.prepare("SELECT COUNT(*) AS n FROM google_search_snapshots").get().n,0);
+    await saveGoogleSearchSnapshots(db,"alice",itemId,"2026-11-04","sd_interrupted",[record]);
+    assert.deepEqual((await getGoogleSearchSnapshots(db,"alice",itemId,30,10))[0].payload,record.payload);
+  } finally {sqlite.close();}
 });

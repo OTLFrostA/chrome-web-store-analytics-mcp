@@ -18,7 +18,8 @@ const first=(id='one',rating=5,comment='Super helpful')=>({
 function mockD1() {
   const sqlite=new DatabaseSync(':memory:');
   for(const p of ['schema.sql','migrations/0001_collectors.sql',
-    'migrations/0002_google_search.sql','migrations/0003_reviews.sql']){
+    'migrations/0002_google_search.sql','migrations/0003_reviews.sql',
+    'migrations/0004_unified_queries.sql','migrations/0005_google_search_snapshot_chunks.sql']){
     sqlite.exec(readFileSync(new URL('../'+p,import.meta.url),'utf8'));
   }
   const db={
