@@ -282,6 +282,21 @@ export function parseBrightDataSnapshot(payload, keywords, itemId) {
   });
 }
 
+// Stable, non-sensitive error labels; never return raw provider or SQL messages.
+function safePollFailureKind(error) {
+  const message = error instanceof Error ? error.message : '';
+  if (/External query response is too large for D1/i.test(message)) return 'json_guard';
+  if (/foreign key constraint/i.test(message)) return 'foreign_key';
+  if (/no such (table|column)|has no column named/i.test(message)) return 'schema';
+  if (/too many SQL variables|binding|bind parameter|parameter index/i.test(message)) return 'sql_bind';
+  if (/too large|too big|limit exceeded|exceeds.*limit|SQLITE_TOOBIG/i.test(message)) return 'size_limit';
+  if (/quota|too many requests|rate limit/i.test(message)) return 'quota';
+  if (/D1_ERROR|SQLITE|database|constraint/i.test(message)) return 'database';
+  if (/invalid|undefined|TypeError|Cannot read|Unexpected token/i.test(message)) return 'invalid_data';
+  if (error instanceof TypeError) return 'network_or_type';
+  return 'unknown';
+}
+
 export async function pollBrightDataRun({env,googleSub,itemId,runId,apiKey,request=fetch}) {
   // Keep provider errors, database SQL and private credentials out of MCP responses.
   // Expose only the stage of a failed poll so persistent jobs can be diagnosed.
@@ -356,6 +371,6 @@ export async function pollBrightDataRun({env,googleSub,itemId,runId,apiKey,reque
   await env.OAUTH_KV.delete(JOB_PREFIX + runId);
   return {runId,status,rowsWritten:written,found,failed};
   } catch (error) {
-    throw new Error('brightdata_poll_failed_' + stage, {cause: error});
+    throw new Error('brightdata_poll_failed_' + stage + '_' + safePollFailureKind(error), {cause: error});
   }
 }
