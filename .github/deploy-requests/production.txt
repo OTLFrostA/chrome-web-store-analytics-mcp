@@ -1,5 +1,4 @@
-Deploy request: 2026-11-04
-Target source: de82facc56b672cde8f113b5f0ceae2049a2dfd0
-Reason: Production release of unified fetch + persist Query Service, all CWS v2 readonly GET endpoints, Bright Data snapshots, CWS ranking snapshots, history MCP tools.
-Prerequisite: 0004_unified_queries.sql applied and verified on the production D1 database before deployment.
+Deploy request: 2026-11-06
+Target source: 7fd9ecd52326e5f1a5b02b91766f8d601d09d3bf
+Reason: Deploy safe Bright Data polling stage diagnostics to isolate Nov 5-6 stuck snapshots without submitting new billed collection jobs.
 Requested by: repository owner via ChatGPT.
