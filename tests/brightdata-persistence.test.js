@@ -58,7 +58,7 @@ test("Bright Data only acknowledges a result after the entire organic record is 
       return db.prepare(sql);
     }};
     await assert.rejects(pollBrightDataRun({env:{...env,MCP_DB:failingDb},
-      googleSub:"alice",itemId,runId,apiKey:"fixture",request}),/D1 temporarily unavailable/);
+      googleSub:"alice",itemId,runId,apiKey:"fixture",request}),/brightdata_poll_failed_snapshot_persist/);
     assert.equal(kvValues.has("brightdata-job:v1:"+runId),true);
     assert.equal(sqlite.prepare("SELECT status FROM google_search_history").get().status,"pending");
     assert.equal(sqlite.prepare("SELECT status FROM collector_runs").get().status,"running");
