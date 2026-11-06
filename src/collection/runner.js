@@ -140,9 +140,11 @@ export async function pollPendingBrightDataRankings({env, googleSub, itemId, lim
       }
       runs.push(await refreshAndStoreBrightDataRankings({env,googleSub:job.googleSub,
         itemId:job.itemId,runId:job.runId,apiKey:key,request}));
-    } catch {
-      // Do not leak response bodies or credentials into logs/tool outputs.
-      runs.push({runId:job.runId,status:'pending',reason:'Snapshot polling failed.'});
+    } catch (error) {
+      // Report only vetted stage identifiers, never raw provider/SQL errors or credentials.
+      const code = error instanceof Error && /^brightdata_poll_failed_[a-z_]+$/.test(error.message)
+        ? error.message.slice('brightdata_poll_failed_'.length) : 'unknown';
+      runs.push({runId:job.runId,status:'pending',reason:'Snapshot polling failed (' + code + ').'});
     }
   }
   return runs;
