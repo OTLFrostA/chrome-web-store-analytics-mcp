@@ -48,6 +48,15 @@ function authProps() {
   return props;
 }
 
+function authenticatedOwnerId() {
+  const ctx=getMcpAuthContext();
+  const props=authProps();
+  const owner=ctx?.auth?.userId;
+  if(typeof owner!=='string'||owner!=='google-'+props.googleSub)
+    throw new Error('Authenticated user identity mismatch.');
+  return owner;
+}
+
 async function userExtensions(sub) {
   return listUserExtensions(env.MCP_DB, sub);
 }
@@ -156,7 +165,7 @@ function createServer() {
     annotations: {readOnlyHint:true,destructiveHint:false,openWorldHint:false},securitySchemes,
   }, async()=>withErrors(async()=>{
     const props=authProps();
-    return result({sources:await listDataSources(env.MCP_DB,props.googleSub)});
+    return result({sources:await listDataSources(env.MCP_DB,authenticatedOwnerId())});
   }));
 
   server.registerTool('register_data_source', {
@@ -175,7 +184,7 @@ function createServer() {
     if(sourceType==='cws'&&!/^[a-p]{32}$/.test(externalResourceId))
       throw new Error('CWS resource must be a valid extension ID.');
     return result({source:await createDataSource(env.MCP_DB,{
-      ownerUserId:props.googleSub,sourceType,externalResourceId,displayName})});
+      ownerUserId:authenticatedOwnerId(),sourceType,externalResourceId,displayName})});
   }));
 
   server.registerTool('begin_data_source_oauth', {
@@ -185,7 +194,7 @@ function createServer() {
     annotations:{readOnlyHint:false,destructiveHint:false,openWorldHint:true},securitySchemes,
   },async({sourceId})=>withErrors(async()=>{
     const props=authProps();
-    return result(await beginSourceOAuth({env,ownerUserId:props.googleSub,sourceId,
+    return result(await beginSourceOAuth({env,ownerUserId:authenticatedOwnerId(),sourceId,
       baseUrl:env.MCP_RESOURCE}));
   }));
 
@@ -196,9 +205,9 @@ function createServer() {
     annotations:{readOnlyHint:false,destructiveHint:true,openWorldHint:false},securitySchemes,
   },async({sourceId})=>withErrors(async()=>{
     const props=authProps();
-    await getDataSource(env.MCP_DB,props.googleSub,sourceId);
+    await getDataSource(env.MCP_DB,authenticatedOwnerId(),sourceId);
     return result(await disconnectDataSourceAuthorization({env,
-      ownerUserId:props.googleSub,sourceId}));
+      ownerUserId:authenticatedOwnerId(),sourceId}));
   }));
 
   server.registerTool("list_extensions", {
