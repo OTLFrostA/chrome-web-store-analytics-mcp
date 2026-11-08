@@ -7,6 +7,7 @@ import { makeCodeVerifier, googleAuthorizeUrl, exchangeCode, fetchGoogleIdentity
 import { oauthOptions, authorizedGoogleIdentity } from "./oauth-options.js";
 import { protectRegistration } from "./registration.js";
 import { handleCollectionSchedule } from "./collection/runner.js";
+import { collectScheduledGa4 } from './collection/ga4-schedule.js';
 import { completeSourceOAuth } from './source-oauth.js';
 
 function consentPage(details, handle) {
@@ -155,8 +156,13 @@ export default {
       guarded => provider.fetch(guarded, bindings, ctx));
   },
   scheduled(controller, bindings, ctx) {
-    ctx.waitUntil(handleCollectionSchedule(bindings, controller.scheduledTime)
-      .then(result => console.log('Scheduled collection completed:', JSON.stringify(result)))
-      .catch(error => console.error('Scheduled collection failed:', error instanceof Error ? error.message : 'unknown')));
+    ctx.waitUntil(Promise.all([
+      handleCollectionSchedule(bindings, controller.scheduledTime)
+        .then(result => console.log('Scheduled CWS collection:', JSON.stringify(result)))
+        .catch(() => console.error('Scheduled CWS collection failed')),
+      collectScheduledGa4(bindings, controller.scheduledTime)
+        .then(result => console.log('Scheduled GA4 collection:', JSON.stringify(result)))
+        .catch(() => console.error('Scheduled GA4 collection failed')),
+    ]));
   },
 };

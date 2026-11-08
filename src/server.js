@@ -25,6 +25,8 @@ import { createDataSource, listDataSources, getDataSource } from './data-sources
 import { beginSourceOAuth } from './source-oauth.js';
 import { disconnectDataSourceAuthorization } from './authorization-manager.js';
 import { resolveAppUser } from './users.js';
+import { collectGa4Source, readGa4History } from './collection/ga4.js';
+import { setGa4DailyCollection } from './collection/ga4-schedule.js';
 
 const securitySchemes = [{ type: "oauth2", scopes: ["cws:read"] }];
 
@@ -197,6 +199,44 @@ function createServer() {
     const props=authProps();
     return result(await beginSourceOAuth({env,ownerUserId:await authenticatedOwnerId(),sourceId,
       baseUrl:env.MCP_RESOURCE}));
+  }));
+
+  server.registerTool('query_ga4', {
+    title:'Query GA4 property and save analytics',
+    description:'Query a connected GA4 data source for up to 90 property-local reporting days. Saves daily active users, sessions, views, install event counts and session source/medium to D1. Missing install events are null, not zero.',
+    inputSchema:{
+      sourceId:z.string().uuid(),
+      dateFrom:z.string().regex(/^\d{4}-\d{2}-\d{2}$/),
+      dateTo:z.string().regex(/^\d{4}-\d{2}-\d{2}$/),
+    },
+    annotations:{readOnlyHint:false,destructiveHint:false,openWorldHint:true},securitySchemes,
+  },async({sourceId,dateFrom,dateTo})=>withErrors(async()=>{
+    const ownerUserId=await authenticatedOwnerId();
+    return result(await collectGa4Source({env,ownerUserId,sourceId,dateFrom,dateTo}));
+  }));
+
+  server.registerTool('get_ga4_history', {
+    title:'Read saved GA4 analytics',
+    description:'Read previously collected GA4 daily totals and channel history from D1 for an owned data source, without calling Google or spending API quota.',
+    inputSchema:{
+      sourceId:z.string().uuid(),
+      dateFrom:z.string().regex(/^\d{4}-\d{2}-\d{2}$/),
+      dateTo:z.string().regex(/^\d{4}-\d{2}-\d{2}$/),
+    },
+    annotations:{readOnlyHint:true,destructiveHint:false,openWorldHint:false},securitySchemes,
+  },async({sourceId,dateFrom,dateTo})=>withErrors(async()=>{
+    const ownerUserId=await authenticatedOwnerId();
+    return result(await readGa4History(env.MCP_DB,{ownerUserId,sourceId,dateFrom,dateTo}));
+  }));
+
+  server.registerTool('set_ga4_daily_collection', {
+    title:'Enable or disable daily GA4 collection',
+    description:'Opt in or out of 9 AM Pacific collection with a rolling seven-day refresh. The data source must be independently authorized; disabling preserves collected history.',
+    inputSchema:{sourceId:z.string().uuid(),enabled:z.boolean()},
+    annotations:{readOnlyHint:false,destructiveHint:false,openWorldHint:false},securitySchemes,
+  },async({sourceId,enabled})=>withErrors(async()=>{
+    const ownerUserId=await authenticatedOwnerId();
+    return result(await setGa4DailyCollection(env.MCP_DB,{ownerUserId,sourceId,enabled}));
   }));
 
   server.registerTool('disconnect_data_source', {
