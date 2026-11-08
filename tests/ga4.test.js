@@ -64,7 +64,7 @@ test('D1 uses a transactional batch, bounded bulk inserts, source ID and date ra
   const n=await persistGa4Reports(db,{sourceId:'source-a',dateFrom:'2026-11-06',
     dateTo:'2026-11-06',daily,channels});
   assert.equal(n,51);
-  assert.equal(calls[0].length,5);
+  assert.equal(calls[0].length,4);
   assert.match(calls[0][0].sql,/DELETE FROM ga4_daily_history/);
   assert.match(calls[0][1].sql,/DELETE FROM ga4_channel_history/);
   assert.ok(calls[0].every(x=>x.params[0]==='source-a'));
