@@ -1,4 +1,4 @@
-Deploy request: 2026-11-06 (Bright Data snapshot hotfix)
-Target source: 4abe53ed22e848a89f332031e29effcd90883e1c
-Reason: Fix oversize Bright Data snapshot persistence with account-scoped D1 chunks. 0005_google_search_snapshot_chunks.sql pre-applied and verified in production D1. Reuse previously submitted snapshots without new Bright Data triggers.
+Deploy request: 2026-11-07 (source authorization architecture refactor)
+Target source: e0d323b5ccdf35e6312812877e32e735af5617ce
+Reason: Deploy PR #18 source-aware identity, data source and authorization infrastructure. Production D1 migrations 0006-0008 applied and verified via Cloudflare API beforehand; CWS legacy collector behavior remains compatible. GA4 collection is not enabled.
 Requested by: repository owner via ChatGPT.
