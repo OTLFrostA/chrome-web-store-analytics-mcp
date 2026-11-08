@@ -24,6 +24,7 @@ import { getMetricHistory, getRankingHistory, deleteExtensionHistory } from "./c
 import { createDataSource, listDataSources, getDataSource } from './data-sources.js';
 import { beginSourceOAuth } from './source-oauth.js';
 import { disconnectDataSourceAuthorization } from './authorization-manager.js';
+import { resolveAppUser } from './users.js';
 
 const securitySchemes = [{ type: "oauth2", scopes: ["cws:read"] }];
 
@@ -48,13 +49,13 @@ function authProps() {
   return props;
 }
 
-function authenticatedOwnerId() {
+async function authenticatedOwnerId() {
   const ctx=getMcpAuthContext();
   const props=authProps();
-  const owner=ctx?.auth?.userId;
-  if(typeof owner!=='string'||owner!=='google-'+props.googleSub)
+  const identity=ctx?.auth?.userId;
+  if(typeof identity!=='string'||identity!=='google-'+props.googleSub)
     throw new Error('Authenticated user identity mismatch.');
-  return owner;
+  return resolveAppUser(env.MCP_DB,{identityProvider:'mcp',identitySubject:identity});
 }
 
 async function userExtensions(sub) {
@@ -165,7 +166,7 @@ function createServer() {
     annotations: {readOnlyHint:true,destructiveHint:false,openWorldHint:false},securitySchemes,
   }, async()=>withErrors(async()=>{
     const props=authProps();
-    return result({sources:await listDataSources(env.MCP_DB,authenticatedOwnerId())});
+    return result({sources:await listDataSources(env.MCP_DB,await authenticatedOwnerId())});
   }));
 
   server.registerTool('register_data_source', {
@@ -184,7 +185,7 @@ function createServer() {
     if(sourceType==='cws'&&!/^[a-p]{32}$/.test(externalResourceId))
       throw new Error('CWS resource must be a valid extension ID.');
     return result({source:await createDataSource(env.MCP_DB,{
-      ownerUserId:authenticatedOwnerId(),sourceType,externalResourceId,displayName})});
+      ownerUserId:await authenticatedOwnerId(),sourceType,externalResourceId,displayName})});
   }));
 
   server.registerTool('begin_data_source_oauth', {
@@ -194,7 +195,7 @@ function createServer() {
     annotations:{readOnlyHint:false,destructiveHint:false,openWorldHint:true},securitySchemes,
   },async({sourceId})=>withErrors(async()=>{
     const props=authProps();
-    return result(await beginSourceOAuth({env,ownerUserId:authenticatedOwnerId(),sourceId,
+    return result(await beginSourceOAuth({env,ownerUserId:await authenticatedOwnerId(),sourceId,
       baseUrl:env.MCP_RESOURCE}));
   }));
 
@@ -205,9 +206,9 @@ function createServer() {
     annotations:{readOnlyHint:false,destructiveHint:true,openWorldHint:false},securitySchemes,
   },async({sourceId})=>withErrors(async()=>{
     const props=authProps();
-    await getDataSource(env.MCP_DB,authenticatedOwnerId(),sourceId);
+    await getDataSource(env.MCP_DB,await authenticatedOwnerId(),sourceId);
     return result(await disconnectDataSourceAuthorization({env,
-      ownerUserId:authenticatedOwnerId(),sourceId}));
+      ownerUserId:await authenticatedOwnerId(),sourceId}));
   }));
 
   server.registerTool("list_extensions", {
