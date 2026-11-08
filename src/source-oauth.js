@@ -42,7 +42,7 @@ export async function beginSourceOAuth({env,ownerUserId,sourceId,baseUrl}) {
   url.searchParams.set('prompt','consent');
   url.searchParams.set('code_challenge_method','S256');
   url.searchParams.set('code_challenge',await challenge(verifier));
-  await setDataSourceAuthStatus(env.MCP_DB,ownerUserId,sourceId,'pending');
+  if(source.authStatus!=='connected')await setDataSourceAuthStatus(env.MCP_DB,ownerUserId,sourceId,'pending');
   return {sourceId,authorizationUrl:url.toString(),expiresIn:TTL_SECONDS};
 }
 export async function completeSourceOAuth(request,env,{requestToken=fetch,requestIdentity=fetch}={}) {
