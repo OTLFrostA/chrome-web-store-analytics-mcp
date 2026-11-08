@@ -206,8 +206,8 @@ function createServer() {
     description:'Query a connected GA4 data source for up to 90 property-local reporting days. Saves daily active users, sessions, views, install event counts and session source/medium to D1. Missing install events are null, not zero.',
     inputSchema:{
       sourceId:z.string().uuid(),
-      dateFrom:z.string().regex(/^\\d{4}-\\d{2}-\\d{2}$/),
-      dateTo:z.string().regex(/^\\d{4}-\\d{2}-\\d{2}$/),
+      dateFrom:z.string().regex(/^\d{4}-\d{2}-\d{2}$/),
+      dateTo:z.string().regex(/^\d{4}-\d{2}-\d{2}$/),
     },
     annotations:{readOnlyHint:false,destructiveHint:false,openWorldHint:true},securitySchemes,
   },async({sourceId,dateFrom,dateTo})=>withErrors(async()=>{
@@ -220,8 +220,8 @@ function createServer() {
     description:'Read previously collected GA4 daily totals and channel history from D1 for an owned data source, without calling Google or spending API quota.',
     inputSchema:{
       sourceId:z.string().uuid(),
-      dateFrom:z.string().regex(/^\\d{4}-\\d{2}-\\d{2}$/),
-      dateTo:z.string().regex(/^\\d{4}-\\d{2}-\\d{2}$/),
+      dateFrom:z.string().regex(/^\d{4}-\d{2}-\d{2}$/),
+      dateTo:z.string().regex(/^\d{4}-\d{2}-\d{2}$/),
     },
     annotations:{readOnlyHint:true,destructiveHint:false,openWorldHint:false},securitySchemes,
   },async({sourceId,dateFrom,dateTo})=>withErrors(async()=>{
