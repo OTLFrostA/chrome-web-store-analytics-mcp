@@ -106,14 +106,22 @@ export async function persistGa4Reports(db,{sourceId,dateFrom,dateTo,daily,chann
       .bind(sourceId,dateFrom,dateTo),
     db.prepare('DELETE FROM ga4_channel_history WHERE source_id=? AND date BETWEEN ? AND ?')
       .bind(sourceId,dateFrom,dateTo),
-    ...daily.map(day=>db.prepare(`INSERT INTO ga4_daily_history
-      (source_id,date,active_users,sessions,page_views,install_events)
-      VALUES (?,?,?,?,?,?)`).bind(sourceId,day.date,day.activeUsers,day.sessions,
-      day.pageViews,day.installEvents)),
-    ...channels.map(row=>db.prepare(`INSERT INTO ga4_channel_history
-      (source_id,date,source_medium,sessions,active_users) VALUES (?,?,?,?,?)`)
-      .bind(sourceId,row.date,row.sourceMedium,row.sessions,row.activeUsers)),
   ];
+  const bulkInsert=(table,columns,values)=>{
+    for(let i=0;i<values.length;i+=25){
+      const rows=values.slice(i,i+25);
+      const params=rows.flat();
+      const placeholders=rows.map(row=>'('+row.map(()=>'?').join(',')+')').join(',');
+      statements.push(db.prepare('INSERT INTO '+table+' ('+columns.join(',')+
+        ') VALUES '+placeholders).bind(...params));
+    }
+  };
+  bulkInsert('ga4_daily_history',
+    ['source_id','date','active_users','sessions','page_views','install_events'],
+    daily.map(day=>[sourceId,day.date,day.activeUsers,day.sessions,day.pageViews,day.installEvents]));
+  bulkInsert('ga4_channel_history',
+    ['source_id','date','source_medium','sessions','active_users'],
+    channels.map(row=>[sourceId,row.date,row.sourceMedium,row.sessions,row.activeUsers]));
   // D1 batch is transactional; a failed write cannot leave partially replaced data.
   await db.batch(statements);
   return daily.length+channels.length;
