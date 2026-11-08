@@ -103,15 +103,17 @@ export async function fetchGa4Reports({propertyId,accessToken,dateFrom,dateTo,re
 }
 export async function persistGa4Reports(db,{sourceId,dateFrom,dateTo,daily,channels}) {
   if(!daily.length)throw new Error('Empty GA4 data must not overwrite history.');
+  const coveredDates=daily.map(day=>day.date);
+  const datesList=coveredDates.map(()=>'?').join(',');
   const statements=[
-    db.prepare('DELETE FROM ga4_daily_history WHERE source_id=? AND date BETWEEN ? AND ?')
-      .bind(sourceId,dateFrom,dateTo),
-    db.prepare('DELETE FROM ga4_channel_history WHERE source_id=? AND date BETWEEN ? AND ?')
-      .bind(sourceId,dateFrom,dateTo),
+    db.prepare('DELETE FROM ga4_daily_history WHERE source_id=? AND date IN ('+datesList+')')
+      .bind(sourceId,...coveredDates),
+    db.prepare('DELETE FROM ga4_channel_history WHERE source_id=? AND date IN ('+datesList+')')
+      .bind(sourceId,...coveredDates),
   ];
   const bulkInsert=(table,columns,values)=>{
-    for(let i=0;i<values.length;i+=25){
-      const rows=values.slice(i,i+25);
+    for(let i=0;i<values.length;i+=100){
+      const rows=values.slice(i,i+100);
       const params=rows.flat();
       const placeholders=rows.map(row=>'('+row.map(()=>'?').join(',')+')').join(',');
       statements.push(db.prepare('INSERT INTO '+table+' ('+columns.join(',')+
