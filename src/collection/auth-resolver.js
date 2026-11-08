@@ -1,5 +1,6 @@
 import { readCollectorCredential, readBrightDataKey } from './credentials.js';
 import { assertAuthRequirement } from './auth-requirements.js';
+import { readProviderGrant } from './provider-credentials.js';
 
 // Transitional bridge: credentials remain in their current encrypted KV records.
 // New providers must be explicitly registered; unknown providers fail closed.
@@ -21,7 +22,16 @@ export async function resolveCollectorAuth({ requirement, env, googleSub, refres
   }
   if (requirement.kind === 'none') return {};
   const resolver = PROVIDERS[requirement.provider + ':' + requirement.connection];
-  if (!resolver) throw new Error('This data source requires a separately configured authorization.');
+  if (!resolver) {
+    if (typeof requirement.connection !== 'string' || !requirement.connection) {
+      throw new Error('The data source has no configured connection.');
+    }
+    const token = await readProviderGrant(env, {
+      owner: googleSub, provider: requirement.provider, connectionId: requirement.connection,
+      kind: requirement.kind, scopes: requirement.scopes,
+    });
+    return requirement.kind === 'oauth' ? { refreshToken: token } : { apiKey: token };
+  }
   const credentials = await resolver({ env, googleSub, refreshToken });
   if (requirement.kind === 'oauth' && !credentials.refreshToken) {
     throw new Error('OAuth authorization is missing.');
