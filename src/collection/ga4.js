@@ -35,13 +35,15 @@ async function queryReport({propertyId,accessToken,body,request=fetch}) {
       throw new Error('GA4 service error (HTTP '+response.status+').');
     }
     const data=await response.json();
-    if(!Array.isArray(data.rows))throw new Error('GA4 report response has no rows array.');
-    result.push(...data.rows);
-    const rowCount=Number(data.rowCount??data.rows.length);
+    const rows=Array.isArray(data.rows)?data.rows:
+      (data.rowCount!==undefined&&Number(data.rowCount)===0?[]:null);
+    if(!rows)throw new Error('GA4 report response has no valid rows array.');
+    result.push(...rows);
+    const rowCount=Number(data.rowCount??rows.length);
     if(!Number.isSafeInteger(rowCount)||rowCount<0||rowCount>50000)
       throw new Error('GA4 report is too large.');
     if(result.length>=rowCount)break;
-    if(data.rows.length===0)throw new Error('GA4 report pagination was incomplete.');
+    if(rows.length===0)throw new Error('GA4 report pagination was incomplete.');
   }
   return result;
 }
