@@ -68,7 +68,7 @@ export async function completeSourceOAuth(request,env,{requestToken=fetch,reques
     method:'POST',headers:{'Content-Type':'application/x-www-form-urlencoded'},
     body:new URLSearchParams({client_id:env.GOOGLE_CLIENT_ID,
       client_secret:env.GOOGLE_CLIENT_SECRET,code,code_verifier:pending.verifier,
-      redirect_uri:redirectUri(request.url),grant_type:'authorization_code'}),
+      redirect_uri:redirectUri(env.MCP_RESOURCE),grant_type:'authorization_code'}),
   });
   if(!response.ok)throw new Error('Upstream token exchange failed.');
   const token=await response.json();
