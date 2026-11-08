@@ -37,7 +37,7 @@ function fixture() {
     async first(){
       if(sql.includes('FROM data_sources')) {
         const row=sources.find(s=>s.ownerUserId===args[0]&&
-          (sql.includes('source_id=?')?s.sourceId===args[1]:
+          (sql.includes('WHERE owner_user_id=? AND source_id=?')?s.sourceId===args[1]:
             s.sourceType===args[1]&&s.externalResourceId===args[2]));
         return row??null;
       }
