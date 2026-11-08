@@ -2,7 +2,7 @@ import { listUserExtensions } from '../storage.js';
 import { collectMetrics } from './metrics.js';
 import { getReviewSettings } from './reviews.js';
 import { queryAndStoreWebStoreRank,queryAndStoreBrightDataRankings,refreshAndStoreBrightDataRankings,collectAndStoreReviews,collectAndStoreMetadata } from '../query-service.js';
-import { saveCollectorCredential, deleteCollectorCredential, hasBrightDataKey } from './credentials.js';
+import { saveCollectorCredential, deleteCollectorCredential, hasBrightDataKey, readBrightDataKey } from './credentials.js';
 import { AUTH } from './auth-requirements.js';
 import { resolveCollectorAuth } from './auth-resolver.js';
 import { listGoogleSearchKeywords } from './brightdata.js';
