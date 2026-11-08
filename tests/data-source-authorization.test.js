@@ -48,6 +48,7 @@ function fixture() {
     async all(){if(sql.includes('FROM data_sources'))return{results:sources.filter(s=>s.ownerUserId===args[0])};throw Error(sql);}
   };}};}};
   const env={MCP_DB:db,GOOGLE_CLIENT_ID:'client',GOOGLE_CLIENT_SECRET:'secret',
+    MCP_RESOURCE:'https://example.com/mcp',
     SCHEDULE_TOKEN_KEY:btoa(String.fromCharCode(...new Uint8Array(32).fill(9))),
     OAUTH_KV:{
       async put(k,v){kv.set(k,v);},
