@@ -2,7 +2,9 @@ import { listUserExtensions } from '../storage.js';
 import { collectMetrics } from './metrics.js';
 import { getReviewSettings } from './reviews.js';
 import { queryAndStoreWebStoreRank,queryAndStoreBrightDataRankings,refreshAndStoreBrightDataRankings,collectAndStoreReviews,collectAndStoreMetadata } from '../query-service.js';
-import { readCollectorCredential, saveCollectorCredential, deleteCollectorCredential, hasBrightDataKey, readBrightDataKey } from './credentials.js';
+import { saveCollectorCredential, deleteCollectorCredential, hasBrightDataKey, readBrightDataKey } from './credentials.js';
+import { AUTH } from './auth-requirements.js';
+import { resolveCollectorAuth } from './auth-resolver.js';
 import { listGoogleSearchKeywords } from './brightdata.js';
 import { localDay, localHour } from './time.js';
 
@@ -23,12 +25,12 @@ async function collectRankings({ env, googleSub, item, now, keywords }) {
 
 // New collectors only need to expose a stable ID and a collect function.
 export const COLLECTORS = Object.freeze({
-  'cws-analytics': { id: 'cws-analytics', schedule: { hourPT: 8 }, collect: collectMetrics },
-  'cws-ranking': { id: 'cws-ranking', schedule: { hourPT: 8 }, collect: collectRankings },
-  'google-search-ranking': { id: 'google-search-ranking', schedule: { hourPT: 8 }, collect: queryAndStoreBrightDataRankings },
+  'cws-analytics': { id: 'cws-analytics', auth: AUTH.CWS, schedule: { hourPT: 8 }, collect: collectMetrics },
+  'cws-ranking': { id: 'cws-ranking', auth: AUTH.PUBLIC, schedule: { hourPT: 8 }, collect: collectRankings },
+  'google-search-ranking': { id: 'google-search-ranking', auth: AUTH.BRIGHT_DATA, schedule: { hourPT: 8 }, collect: queryAndStoreBrightDataRankings },
   // Offset review polling so it does not contend with the 8 AM analytics API quota.
-  'cws-reviews': { id: 'cws-reviews', schedule: { hourPT: 9 }, collect: collectAndStoreReviews },
-  'cws-metadata': { id: 'cws-metadata', schedule: { hourPT: 9 }, collect: collectAndStoreMetadata },
+  'cws-reviews': { id: 'cws-reviews', auth: AUTH.CWS, schedule: { hourPT: 9 }, collect: collectAndStoreReviews },
+  'cws-metadata': { id: 'cws-metadata', auth: AUTH.CWS, schedule: { hourPT: 9 }, collect: collectAndStoreMetadata },
 });
 
 export async function updateKeywords(db, googleSub, itemId, keywords) {
@@ -88,9 +90,9 @@ export async function runOneCollector({ env, googleSub, item, taskId, trigger = 
     VALUES (?, ?, ?, ?, ?, ?, 'running')`).bind(runId, googleSub, item.itemId, taskId, date, trigger).run();
   if ((claim.meta?.changes ?? 0) === 0) return { taskId, skipped: true, reason: 'Already scheduled today.' };
   try {
-    const credential = ['cws-analytics', 'cws-reviews', 'cws-metadata'].includes(taskId)
-      ? (refreshToken || await readCollectorCredential(env, googleSub)) : undefined;
-    const apiKey = taskId === 'google-search-ranking' ? await readBrightDataKey(env, googleSub) : undefined;
+    const { refreshToken: credential, apiKey } = await resolveCollectorAuth({
+      requirement: collector.auth, env, googleSub, refreshToken,
+    });
     const result = await collector.collect({
       env, googleSub, item, now, runId, refreshToken: credential,
       keywords: taskId === 'google-search-ranking' ? googleKeywords : keywords, apiKey,

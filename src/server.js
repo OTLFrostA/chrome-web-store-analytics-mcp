@@ -21,6 +21,10 @@ import { BRIGHTDATA_SETTINGS_URI, BRIGHTDATA_SETTINGS_MIME, BRIGHTDATA_SETTINGS_
 import { readKeywordSettings, saveKeywordSettings } from "./collection/keyword-settings.js";
 import { getReviewSettings, setReviewSettings, getSavedReviews } from "./collection/reviews.js";
 import { getMetricHistory, getRankingHistory, deleteExtensionHistory } from "./collection/history.js";
+import { createDataSource, listDataSources, getDataSource } from './data-sources.js';
+import { beginSourceOAuth } from './source-oauth.js';
+import { disconnectDataSourceAuthorization } from './authorization-manager.js';
+import { resolveAppUser } from './users.js';
 
 const securitySchemes = [{ type: "oauth2", scopes: ["cws:read"] }];
 
@@ -43,6 +47,15 @@ function authProps() {
     throw new Error("Please connect your Google account before using Chrome Web Store Analytics.");
   }
   return props;
+}
+
+async function authenticatedOwnerId() {
+  const ctx=getMcpAuthContext();
+  const props=authProps();
+  const identity=ctx?.auth?.userId;
+  if(typeof identity!=='string'||identity!=='google-'+props.googleSub)
+    throw new Error('Authenticated user identity mismatch.');
+  return resolveAppUser(env.MCP_DB,{identityProvider:'mcp',identitySubject:identity});
 }
 
 async function userExtensions(sub) {
@@ -143,6 +156,59 @@ function createServer() {
   }, async () => withErrors(async () => {
     const props = authProps();
     return result({ id: "google:" + props.googleSub, email: props.googleEmail || "" });
+  }));
+
+  // Source management is separate from MCP identity and collector execution.
+  server.registerTool('list_data_sources', {
+    title: 'List owned data sources and their authorization state',
+    description: 'List external properties connected by the authenticated MCP user. No credential values are returned.',
+    inputSchema: {},
+    annotations: {readOnlyHint:true,destructiveHint:false,openWorldHint:false},securitySchemes,
+  }, async()=>withErrors(async()=>{
+    const props=authProps();
+    return result({sources:await listDataSources(env.MCP_DB,await authenticatedOwnerId())});
+  }));
+
+  server.registerTool('register_data_source', {
+    title: 'Register an external data source',
+    description: 'Create a user-owned data source record. Registration does not grant access or enable collection.',
+    inputSchema: {
+      sourceType:z.enum(['ga4','cws']),
+      externalResourceId:z.string().min(1).max(250),
+      displayName:z.string().min(1).max(250),
+    },
+    annotations:{readOnlyHint:false,destructiveHint:false,openWorldHint:false},securitySchemes,
+  },async({sourceType,externalResourceId,displayName})=>withErrors(async()=>{
+    const props=authProps();
+    if(sourceType==='ga4'&&!/^\d{1,30}$/.test(externalResourceId))
+      throw new Error('GA4 property must be its numeric property ID.');
+    if(sourceType==='cws'&&!/^[a-p]{32}$/.test(externalResourceId))
+      throw new Error('CWS resource must be a valid extension ID.');
+    return result({source:await createDataSource(env.MCP_DB,{
+      ownerUserId:await authenticatedOwnerId(),sourceType,externalResourceId,displayName})});
+  }));
+
+  server.registerTool('begin_data_source_oauth', {
+    title:'Authorize one data source with Google',
+    description:'Start source-specific Google consent with its own scopes, state and PKCE. Returns an authorization URL; completion occurs at the verified server callback. Requires the /source-oauth/callback redirect URI in Google Cloud.',
+    inputSchema:{sourceId:z.string().uuid()},
+    annotations:{readOnlyHint:false,destructiveHint:false,openWorldHint:true},securitySchemes,
+  },async({sourceId})=>withErrors(async()=>{
+    const props=authProps();
+    return result(await beginSourceOAuth({env,ownerUserId:await authenticatedOwnerId(),sourceId,
+      baseUrl:env.MCP_RESOURCE}));
+  }));
+
+  server.registerTool('disconnect_data_source', {
+    title:'Disconnect authorization for a single data source',
+    description:'Delete only this source credential and authorization metadata; does not revoke Google-wide consent or delete saved metrics. To revoke provider-wide access, use Google Account settings.',
+    inputSchema:{sourceId:z.string().uuid()},
+    annotations:{readOnlyHint:false,destructiveHint:true,openWorldHint:false},securitySchemes,
+  },async({sourceId})=>withErrors(async()=>{
+    const props=authProps();
+    await getDataSource(env.MCP_DB,await authenticatedOwnerId(),sourceId);
+    return result(await disconnectDataSourceAuthorization({env,
+      ownerUserId:await authenticatedOwnerId(),sourceId}));
   }));
 
   server.registerTool("list_extensions", {
