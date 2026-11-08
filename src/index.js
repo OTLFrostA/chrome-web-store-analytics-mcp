@@ -7,6 +7,7 @@ import { makeCodeVerifier, googleAuthorizeUrl, exchangeCode, fetchGoogleIdentity
 import { oauthOptions, authorizedGoogleIdentity } from "./oauth-options.js";
 import { protectRegistration } from "./registration.js";
 import { handleCollectionSchedule } from "./collection/runner.js";
+import { completeSourceOAuth } from './source-oauth.js';
 
 function consentPage(details, handle) {
   const client = escapeHtml(details.clientName);
@@ -101,6 +102,18 @@ const handler = {
     try {
       if (url.pathname === "/authorize") return await authorize(request, bindings);
       if (url.pathname === "/callback" && request.method === "GET") return await callback(request, bindings);
+      if (url.pathname === '/source-oauth/callback' && request.method === 'GET') {
+        try {
+          const completed=await completeSourceOAuth(request,bindings);
+          return new Response('Data source authorized: '+completed.sourceId,{
+            status:200,headers:{'Content-Type':'text/plain; charset=utf-8','Cache-Control':'no-store'},
+          });
+        } catch {
+          return new Response('Data source authorization failed. Return to MCP and retry.',{
+            status:400,headers:{'Content-Type':'text/plain; charset=utf-8','Cache-Control':'no-store'},
+          });
+        }
+      }
       if (request.method === "GET" && url.pathname === "/.well-known/openai-apps-challenge") {
         const value = bindings.OPENAI_APPS_CHALLENGE;
         if (typeof value !== "string" || !value.trim()) return new Response("Not configured", { status: 404 });
