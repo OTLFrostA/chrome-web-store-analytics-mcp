@@ -1,4 +1,4 @@
-Deploy request: 2026-11-07 (source authorization architecture refactor)
-Target source: e0d323b5ccdf35e6312812877e32e735af5617ce
-Reason: Deploy PR #18 source-aware identity, data source and authorization infrastructure. Production D1 migrations 0006-0008 applied and verified via Cloudflare API beforehand; CWS legacy collector behavior remains compatible. GA4 collection is not enabled.
+Deploy request: 2026-11-07 (GA4 source collector)
+Target source: db8ead49949f75f40c60cb355d0dfa88ac0b1a45
+Reason: Deploy PR #19 GA4 source-owned Data API analytics query, D1 history and opt-in Cron. Production migration 0009_ga4.sql pre-applied and verified. No GA4 connection automatically enabled. Existing CWS and Bright Data collectors remain enabled under the legacy path.
 Requested by: repository owner via ChatGPT.
