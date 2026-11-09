@@ -24,7 +24,7 @@ import { getMetricHistory, getRankingHistory, deleteExtensionHistory } from "./c
 import { createDataSource, listDataSources, getDataSource } from './data-sources.js';
 import { beginSourceOAuth } from './source-oauth.js';
 import { disconnectDataSourceAuthorization } from './authorization-manager.js';
-import { resolveAppUser } from './users.js';
+import { resolveMcpOwner } from './users.js';
 import { collectGa4Source, readGa4History } from './collection/ga4.js';
 import { setGa4DailyCollection } from './collection/ga4-schedule.js';
 
@@ -52,12 +52,9 @@ function authProps() {
 }
 
 async function authenticatedOwnerId() {
-  const ctx=getMcpAuthContext();
-  const props=authProps();
-  const identity=ctx?.auth?.userId;
-  if(typeof identity!=='string'||identity!=='google-'+props.googleSub)
-    throw new Error('Authenticated user identity mismatch.');
-  return resolveAppUser(env.MCP_DB,{identityProvider:'mcp',identitySubject:identity});
+  // index.js already verifies ctx.auth.userId against ctx.props.googleSub.
+  // getMcpAuthContext() exposes the verified props, not ctx.auth.userId.
+  return resolveMcpOwner(env.MCP_DB, authProps().googleSub);
 }
 
 async function userExtensions(sub) {

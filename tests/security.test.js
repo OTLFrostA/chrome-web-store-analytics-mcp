@@ -5,6 +5,7 @@ import { enforceGoogleRateLimit } from "../src/rate-limit.js";
 import { disconnectGoogleAccount } from "../src/account-service.js";
 import { revokeGoogleRefreshToken } from "../src/google.js";
 import { oauthOptions, authorizedGoogleIdentity } from "../src/oauth-options.js";
+import { resolveMcpOwner } from "../src/users.js";
 import { SETUP_HTML } from "../src/setup-ui.js";
 
 const aliceId = "abcdefghijklmnopabcdefghijklmnop";
@@ -67,6 +68,50 @@ test("MCP user ID is verified against authenticated Google OAuth props", () => {
   assert.equal(authorizedGoogleIdentity({ props: { googleSub: "alice" }, auth: { userId: "google-alice" } }), true);
   assert.equal(authorizedGoogleIdentity({ props: { googleSub: "bob" }, auth: { userId: "google-alice" } }), false);
   assert.equal(authorizedGoogleIdentity({ props: { googleSub: "alice" }, auth: {} }), false);
+});
+
+test("MCP data source owner uses verified Google props and isolates application users", async () => {
+  const identities = new Map();
+  const db = {
+    prepare(sql) {
+      return {
+        bind(...args) {
+          return {
+            async first() {
+              assert.match(sql, /FROM app_user_identities/);
+              const userId = identities.get(args[0] + ":" + args[1]);
+              return userId ? { userId } : null;
+            },
+            async run() {
+              if (sql.startsWith("INSERT INTO app_users")) return { meta: { changes: 1 } };
+              if (sql.startsWith("INSERT INTO app_user_identities")) {
+                const [provider, subject, userId] = args;
+                const key = provider + ":" + subject;
+                if (!identities.has(key)) identities.set(key, userId);
+                return { meta: { changes: 1 } };
+              }
+              throw new Error("Unexpected SQL: " + sql);
+            },
+          };
+        },
+      };
+    },
+  };
+
+  // The OAuthProvider request boundary rejects mismatched and missing identities.
+  const aliceSession = { props: { googleSub: "alice" }, auth: { userId: "google-alice" } };
+  assert.equal(authorizedGoogleIdentity(aliceSession), true);
+  assert.equal(authorizedGoogleIdentity({ props: aliceSession.props, auth: { userId: "google-bob" } }), false);
+  assert.equal(authorizedGoogleIdentity({ props: aliceSession.props }), false);
+
+  // Tool callbacks receive authenticated props but not the outer ctx.auth.
+  const alice = await resolveMcpOwner(db, aliceSession.props.googleSub);
+  assert.equal(await resolveMcpOwner(db, "alice"), alice);
+  const bob = await resolveMcpOwner(db, "bob");
+  assert.notEqual(alice, bob);
+  assert.deepEqual([...identities.keys()].sort(), ["mcp:google-alice", "mcp:google-bob"]);
+  await assert.rejects(resolveMcpOwner(db, "invalid:subject"), /Invalid Google account identifier/);
+  await assert.rejects(resolveMcpOwner(db, undefined), /Invalid Google account identifier/);
 });
 
 test("Google API rate limiting uses verified subject and fails closed", async () => {
