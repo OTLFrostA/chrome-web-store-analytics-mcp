@@ -1,3 +1,5 @@
+import { googleOAuthUserId } from './google.js';
+
 // Application users are not the same as MCP OAuth logins or downstream Google accounts.
 // This mapping allows additional login identities to be linked without rewriting sources.
 export async function resolveAppUser(db,{identityProvider,identitySubject}) {
@@ -17,4 +19,13 @@ export async function resolveAppUser(db,{identityProvider,identitySubject}) {
   const mapped=await read();
   if(!mapped)throw new Error('Could not associate authenticated user.');
   return mapped.userId;
+}
+
+// Called only after OAuthProvider's authorizedGoogleIdentity() gate accepts the request.
+// The MCP tool context exposes authenticated props, not the gateway's auth.userId.
+export async function resolveMcpOwner(db, verifiedGoogleSub) {
+  return resolveAppUser(db, {
+    identityProvider: 'mcp',
+    identitySubject: googleOAuthUserId(verifiedGoogleSub),
+  });
 }
