@@ -1,72 +1,44 @@
-# Data source and authorization architecture (incremental migration)
+# Data source ownership and authorization
 
-This document describes the new source-bound model introduced in PR #18.
-**The existing CWS flow is a compatibility implementation and has not been migrated.**
+The **verified Google OAuth subject (`google_sub`) is the sole tenant identity**.
+There is no internal user UUID or login-to-user mapping in the live authorization
+path. CWS, Bright Data and independent data sources use the same login subject.
 
-## Domain entities
+## Boundaries
 
-- **Application user** (`app_users.user_id`): internal UUID, independent of login provider.
-  `app_user_identities` maps authenticated MCP identities to the app user.
-- **Data source** (`data_sources.source_id`): a user-owned external property or resource,
-  such as GA4 property `551943445` or a CWS extension. It stores a source type,
-  provider, external resource ID, and authorization status, never secrets.
-- **Authorization** (`data_source_authorizations.source_id`): metadata for the
-  permission grant attached to exactly one data source. Its secret is stored in
-  encrypted KV using `owner user ID + provider + source ID`.
-  OAuth permissions are provider scopes, not MCP client scopes.
-- **Collector**: executable logic for a family of source types. A collector
-  declares supported source types; configuration connects an instance to a source
-  through `data_source_collectors`. It does not own an OAuth grant.
-- **Collection result**: metric/history records, which should be keyed by source
-  and date/dimensions when the new collectors are migrated.
+- Login: the OAuth provider binds its grant to the Google subject and verifies
+  the subject against the grant's user ID on every MCP request. Tool inputs never
+  specify the owner. The server passes the authenticated `googleSub` directly.
+- Source: a UUID identifies an external property, not an account. A source belongs
+  to a verified Google subject. All source operations look up `google_sub + source_id`
+  before using history, credentials or collector configuration.
+- Authorization: a downstream provider identity can differ from the login identity.
+  An independently authorized source has its own grant, encrypted in KV with
+  `googleSub + provider + sourceId` as the credential namespace and AES-GCM AAD.
+- Collector: scheduled execution obtains the subject from the persisted source row,
+  checks ownership, authorization and scopes, and does not reuse another source's grant.
+- CWS and Bright Data retain their existing account-bound storage and collectors.
+  They already use `google_sub`; their histories, credentials and collection
+  subscriptions do not need migration.
 
-```text
-MCP login -> app_user_identity -> application user
-                                      |
-                                      +-- data source (GA4 property A)
-                                      |     +-- source authorization -> encrypted KV grant
-                                      |     +-- collectors: sessions, events, channels
-                                      |
-                                      +-- data source (CWS extension B)
-                                            +-- source authorization -> encrypted KV grant
-                                            +-- collectors: metrics, ratings, reviews
-```
+## One-time migration from the UUID model
 
-## Authorization lifecycle
+Migration `0010_google_sub_ownership.sql` must be applied atomically before
+deploying this Worker to an existing database. Capture a D1 Time Travel bookmark
+or backup and check the old identity belongs to the intended account. The migration
+fails closed for missing/ambiguous identities, overlapping owner namespaces,
+mismatched authorization metadata and in-flight source OAuth transactions.
 
-1. Authenticated MCP session resolves an internal user. User registers a source.
-2. `begin_data_source_oauth(sourceId)` verifies ownership and source type.
-   It creates a 10-minute PKCE transaction and a one-time, source-bound state.
-3. Google redirects to `/source-oauth/callback`. The callback atomically claims
-   state, exchanges the authorization code using PKCE, checks granted scopes and
-   verified upstream identity, then calls the internal authorization manager.
-4. The manager persists the refresh token encrypted with account/source-bound AAD,
-   and saves only nonsecret metadata in D1. Tokens are never returned over MCP.
-5. Each future source-bound collection resolves its source and verifies owner,
-   enabled state, source type, authorization status and required scopes.
-6. Disconnecting a source deletes only that local source grant; it leaves history
-   and other source connections intact. Provider-wide revocation is deliberately
-   not attempted because shared Google OAuth client grants may be affected.
-   Account-wide deletion and independent provider revocation must be addressed
-   before migrating production users to this path.
+It preserves source UUIDs, data, history, enabled flags and collector settings.
+It removes the old mapping tables and changes the source ownership columns to
+`google_sub`. It clears old authorization metadata and requires fresh source OAuth
+consent: old encrypted KV grants were bound to a UUID, not the Google subject.
+Do not copy ciphertext into the new namespace or globally revoke the Google
+client. Remove only the old source-grant KV keys after the migration and reconnect
+the affected sources. Unexpired authorization transactions must finish or expire
+before the migration. No CWS login reconnection is required.
 
-The Google OAuth client must have `https://<MCP_WORKER_HOST>/source-oauth/callback`
-registered as a redirect URI. This is separate from the MCP login `/callback`.
-GA4 requests `analytics.readonly`; CWS requests `chromewebstore.readonly`.
-All privileges are optional, least-privilege and source-specific.
-
-## Migration contract
-
-- Preserve `user_extensions`, existing CWS OAuth props, the scheduled CWS KV
-  credential and existing Bright Data keys until fully migrated and tested.
-- No collector may silently reuse an authorization from another source.
-- Migration should create source records for existing extensions, move existing
-  credentials to source-scoped KV, verify successful refresh/access, then switch
-  jobs and history to source IDs. Do not remove legacy grants before verification.
-- New `data_source_collectors` is a source-collector relation; the legacy scheduler
-  is not yet using it. `executeSourceCollector` is a new execution boundary for
-  future source-bound collector implementations.
-- GA4 query/persist, source-bound Cron scheduling, provider-token refresh/revocation,
-  account-wide deletion, and production migration are **not implemented** by this PR.
-- Do not merge or deploy PR #18 as a complete auth migration. Run test + Worker
-  dry-run + OAuth integration checks before enabling the new path.
+The old Worker fails closed for source operations after the column rename;
+the new Worker must not be deployed against the old schema. Coordinate the
+schema cutover and production release, then verify the original source IDs,
+historical rows, new authorization and scheduled collector configuration.
