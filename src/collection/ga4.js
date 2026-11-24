@@ -161,17 +161,17 @@ export const GA4_COLLECTOR=Object.freeze({
       dateFrom,dateTo,rowsWritten,daily,channels};
   },
 });
-export async function collectGa4Source({env,ownerUserId,sourceId,dateFrom,dateTo,request=fetch}) {
+export async function collectGa4Source({env,googleSub,sourceId,dateFrom,dateTo,request=fetch}) {
   validateGa4Range(dateFrom,dateTo);
-  return executeSourceCollector({env,ownerUserId,sourceId,
+  return executeSourceCollector({env,googleSub,sourceId,
     collector:{...GA4_COLLECTOR,collect:args=>
       GA4_COLLECTOR.collect({...args,dateFrom,dateTo,request})}});
 }
-export async function readGa4History(db,{ownerUserId,sourceId,dateFrom,dateTo}) {
+export async function readGa4History(db,{googleSub,sourceId,dateFrom,dateTo}) {
   validateGa4Range(dateFrom,dateTo);
   // Enforce source ownership in each read, including the channel breakdown.
   const {getDataSource}=await import('../data-sources.js');
-  const source=await getDataSource(db,ownerUserId,sourceId);
+  const source=await getDataSource(db,googleSub,sourceId);
   if(source.sourceType!=='ga4')throw new Error('This data source is not GA4.');
   const [d,c]=await Promise.all([
     db.prepare(`SELECT date,active_users AS activeUsers,sessions,page_views AS pageViews,
