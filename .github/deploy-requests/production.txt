@@ -1,5 +1,5 @@
-Deploy request: 2026-11-24 (GA4 collection fix)
-Target source: f2e4ed78591c92d3c02e0d45ad041a79cd525cca
-Reason: Deploy PR #21, fixing the D1 bind parameter limit and valid empty GA4 reports. No OAuth scope or database schema changes.
-Validation: PR #21 MCP CI passed npm test and npm run check. Production smoke test and authenticated 7-day/90-day GA4 query verification required after deployment.
+Deploy request: 2026-11-24 (Google subject ownership)
+Target source: 9caff54c2537b7b97baf8a42fe0ec21fbf18eeb5
+Reason: Deploy PR #22, using the verified Google OAuth subject as the sole tenant identity.
+Validation: PR #22 CI passed. Production D1 migration 0010 completed; existing source ID, history and collector settings preserved. Verify authenticated source access and reconnect GA4 authorization after deployment.
 Requested by: repository owner via ChatGPT.
