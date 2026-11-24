@@ -1,5 +1,5 @@
-Deploy request: 2026-11-09 (MCP account identity fix)
-Target source: 42fdc9d173a6d21003f054e416060eeb3ed3ad88
-Reason: Deploy PR #20, restoring MCP data-source ownership mapping using OAuth-validated Google subject. Fixes list_data_sources identity mismatch and unlocks GA4 source-management API. No OAuth scope or D1 schema changes.
-Validation: PR #20 MCP CI passed npm test and npm run check. Production smoke test and authenticated list_data_sources verification required after deployment.
+Deploy request: 2026-11-24 (GA4 collection fix)
+Target source: f2e4ed78591c92d3c02e0d45ad041a79cd525cca
+Reason: Deploy PR #21, fixing the D1 bind parameter limit and valid empty GA4 reports. No OAuth scope or database schema changes.
+Validation: PR #21 MCP CI passed npm test and npm run check. Production smoke test and authenticated 7-day/90-day GA4 query verification required after deployment.
 Requested by: repository owner via ChatGPT.
