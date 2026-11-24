@@ -4,6 +4,8 @@ import { executeSourceCollector } from './source-runner.js';
 const ENDPOINT='https://analyticsdata.googleapis.com/v1beta/properties/';
 const DAY=/^\d{4}-\d{2}-\d{2}$/;
 const CHUNK_LIMIT=10000;
+// D1 allows at most 100 bound parameters per SQL statement (not 100 rows).
+const D1_PARAMETER_LIMIT=100;
 
 export function validateGa4Range(dateFrom,dateTo) {
   if(typeof dateFrom!=='string'||typeof dateTo!=='string'||!DAY.test(dateFrom)||!DAY.test(dateTo))
@@ -35,14 +37,26 @@ async function queryReport({propertyId,accessToken,body,request=fetch}) {
       throw new Error('GA4 service error (HTTP '+response.status+').');
     }
     const data=await response.json();
-    const rows=Array.isArray(data.rows)?data.rows:
-      (data.rowCount!==undefined&&Number(data.rowCount)===0?[]:null);
+    if(!data||typeof data!=='object'||Array.isArray(data)||data.error!==undefined)
+      throw new Error('Invalid GA4 report response.');
+    // Google omits both rows and rowCount in empty protobuf JSON reports.
+    // Require the expected response kind and schema for that omitted-field case.
+    const matchesHeaders=(headers,requested)=>Array.isArray(headers)&&
+      headers.length===requested.length&&
+      requested.every((field,index)=>headers[index]?.name===field.name);
+    const emptyReport=data.rows===undefined&&(
+      data.rowCount===0||(data.rowCount===undefined&&
+        data.kind==='analyticsData#runReport'&&
+        matchesHeaders(data.dimensionHeaders,body.dimensions)&&
+        matchesHeaders(data.metricHeaders,body.metrics)));
+    const rows=Array.isArray(data.rows)?data.rows:emptyReport?[]:null;
     if(!rows)throw new Error('GA4 report response has no valid rows array.');
     result.push(...rows);
     const rowCount=Number(data.rowCount??rows.length);
     if(!Number.isSafeInteger(rowCount)||rowCount<0||rowCount>50000)
       throw new Error('GA4 report is too large.');
-    if(result.length>=rowCount)break;
+    if(result.length>rowCount)throw new Error('Invalid GA4 report row count.');
+    if(result.length===rowCount)break;
     if(rows.length===0)throw new Error('GA4 report pagination was incomplete.');
   }
   return result;
@@ -60,7 +74,6 @@ function numberAt(raw,index) {
 }
 export function parseGa4Reports({total,installs,channels,dateFrom,dateTo}) {
   validateGa4Range(dateFrom,dateTo);
-  if(!total.length)throw new Error('GA4 reported no daily data for this date range.');
   const days=new Map();
   for(const row of total) {
     const date=parseDate(row);
@@ -102,7 +115,11 @@ export async function fetchGa4Reports({propertyId,accessToken,dateFrom,dateTo,re
   return parseGa4Reports({total,installs,channels,dateFrom,dateTo});
 }
 export async function persistGa4Reports(db,{sourceId,dateFrom,dateTo,daily,channels}) {
-  if(!daily.length)throw new Error('Empty GA4 data must not overwrite history.');
+  // A valid empty report has no covered dates; never delete history or invent zeros.
+  if(!daily.length){
+    if(channels.length)throw new Error('GA4 channels without daily coverage.');
+    return 0;
+  }
   const coveredDates=daily.map(day=>day.date);
   const datesList=coveredDates.map(()=>'?').join(',');
   const statements=[
@@ -112,8 +129,9 @@ export async function persistGa4Reports(db,{sourceId,dateFrom,dateTo,daily,chann
       .bind(sourceId,...coveredDates),
   ];
   const bulkInsert=(table,columns,values)=>{
-    for(let i=0;i<values.length;i+=100){
-      const rows=values.slice(i,i+100);
+    const rowsPerStatement=Math.floor(D1_PARAMETER_LIMIT/columns.length);
+    for(let i=0;i<values.length;i+=rowsPerStatement){
+      const rows=values.slice(i,i+rowsPerStatement);
       const params=rows.flat();
       const placeholders=rows.map(row=>'('+row.map(()=>'?').join(',')+')').join(',');
       statements.push(db.prepare('INSERT INTO '+table+' ('+columns.join(',')+
