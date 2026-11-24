@@ -1,6 +1,6 @@
 # GA4 property collector
 
-GA4 is an independently authorized **data source** owned by an application user;
+GA4 is an independently authorized **data source** owned by the verified Google login subject;
 it is not a permission added to the MCP login or Chrome Web Store OAuth token.
 
 ## Google Cloud prerequisites

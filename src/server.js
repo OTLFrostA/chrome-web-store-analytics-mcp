@@ -21,10 +21,9 @@ import { BRIGHTDATA_SETTINGS_URI, BRIGHTDATA_SETTINGS_MIME, BRIGHTDATA_SETTINGS_
 import { readKeywordSettings, saveKeywordSettings } from "./collection/keyword-settings.js";
 import { getReviewSettings, setReviewSettings, getSavedReviews } from "./collection/reviews.js";
 import { getMetricHistory, getRankingHistory, deleteExtensionHistory } from "./collection/history.js";
-import { createDataSource, listDataSources, getDataSource } from './data-sources.js';
+import { createDataSource, listDataSources } from './data-sources.js';
 import { beginSourceOAuth } from './source-oauth.js';
 import { disconnectDataSourceAuthorization } from './authorization-manager.js';
-import { resolveMcpOwner } from './users.js';
 import { collectGa4Source, readGa4History } from './collection/ga4.js';
 import { setGa4DailyCollection } from './collection/ga4-schedule.js';
 
@@ -49,12 +48,6 @@ function authProps() {
     throw new Error("Please connect your Google account before using Chrome Web Store Analytics.");
   }
   return props;
-}
-
-async function authenticatedOwnerId() {
-  // index.js already verifies ctx.auth.userId against ctx.props.googleSub.
-  // getMcpAuthContext() exposes the verified props, not ctx.auth.userId.
-  return resolveMcpOwner(env.MCP_DB, authProps().googleSub);
 }
 
 async function userExtensions(sub) {
@@ -164,8 +157,7 @@ function createServer() {
     inputSchema: {},
     annotations: {readOnlyHint:true,destructiveHint:false,openWorldHint:false},securitySchemes,
   }, async()=>withErrors(async()=>{
-    const props=authProps();
-    return result({sources:await listDataSources(env.MCP_DB,await authenticatedOwnerId())});
+    return result({sources:await listDataSources(env.MCP_DB,authProps().googleSub)});
   }));
 
   server.registerTool('register_data_source', {
@@ -178,13 +170,12 @@ function createServer() {
     },
     annotations:{readOnlyHint:false,destructiveHint:false,openWorldHint:false},securitySchemes,
   },async({sourceType,externalResourceId,displayName})=>withErrors(async()=>{
-    const props=authProps();
     if(sourceType==='ga4'&&!/^\d{1,30}$/.test(externalResourceId))
       throw new Error('GA4 property must be its numeric property ID.');
     if(sourceType==='cws'&&!/^[a-p]{32}$/.test(externalResourceId))
       throw new Error('CWS resource must be a valid extension ID.');
     return result({source:await createDataSource(env.MCP_DB,{
-      ownerUserId:await authenticatedOwnerId(),sourceType,externalResourceId,displayName})});
+      googleSub:authProps().googleSub,sourceType,externalResourceId,displayName})});
   }));
 
   server.registerTool('begin_data_source_oauth', {
@@ -193,8 +184,7 @@ function createServer() {
     inputSchema:{sourceId:z.string().uuid()},
     annotations:{readOnlyHint:false,destructiveHint:false,openWorldHint:true},securitySchemes,
   },async({sourceId})=>withErrors(async()=>{
-    const props=authProps();
-    return result(await beginSourceOAuth({env,ownerUserId:await authenticatedOwnerId(),sourceId,
+    return result(await beginSourceOAuth({env,googleSub:authProps().googleSub,sourceId,
       baseUrl:env.MCP_RESOURCE}));
   }));
 
@@ -208,8 +198,8 @@ function createServer() {
     },
     annotations:{readOnlyHint:false,destructiveHint:false,openWorldHint:true},securitySchemes,
   },async({sourceId,dateFrom,dateTo})=>withErrors(async()=>{
-    const ownerUserId=await authenticatedOwnerId();
-    return result(await collectGa4Source({env,ownerUserId,sourceId,dateFrom,dateTo}));
+    const googleSub=authProps().googleSub;
+    return result(await collectGa4Source({env,googleSub,sourceId,dateFrom,dateTo}));
   }));
 
   server.registerTool('get_ga4_history', {
@@ -222,8 +212,8 @@ function createServer() {
     },
     annotations:{readOnlyHint:true,destructiveHint:false,openWorldHint:false},securitySchemes,
   },async({sourceId,dateFrom,dateTo})=>withErrors(async()=>{
-    const ownerUserId=await authenticatedOwnerId();
-    return result(await readGa4History(env.MCP_DB,{ownerUserId,sourceId,dateFrom,dateTo}));
+    const googleSub=authProps().googleSub;
+    return result(await readGa4History(env.MCP_DB,{googleSub,sourceId,dateFrom,dateTo}));
   }));
 
   server.registerTool('set_ga4_daily_collection', {
@@ -232,8 +222,8 @@ function createServer() {
     inputSchema:{sourceId:z.string().uuid(),enabled:z.boolean()},
     annotations:{readOnlyHint:false,destructiveHint:false,openWorldHint:false},securitySchemes,
   },async({sourceId,enabled})=>withErrors(async()=>{
-    const ownerUserId=await authenticatedOwnerId();
-    return result(await setGa4DailyCollection(env.MCP_DB,{ownerUserId,sourceId,enabled}));
+    const googleSub=authProps().googleSub;
+    return result(await setGa4DailyCollection(env.MCP_DB,{googleSub,sourceId,enabled}));
   }));
 
   server.registerTool('disconnect_data_source', {
@@ -242,10 +232,8 @@ function createServer() {
     inputSchema:{sourceId:z.string().uuid()},
     annotations:{readOnlyHint:false,destructiveHint:true,openWorldHint:false},securitySchemes,
   },async({sourceId})=>withErrors(async()=>{
-    const props=authProps();
-    await getDataSource(env.MCP_DB,await authenticatedOwnerId(),sourceId);
     return result(await disconnectDataSourceAuthorization({env,
-      ownerUserId:await authenticatedOwnerId(),sourceId}));
+      googleSub:authProps().googleSub,sourceId}));
   }));
 
   server.registerTool("list_extensions", {

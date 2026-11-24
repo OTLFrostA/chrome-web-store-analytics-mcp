@@ -2,6 +2,8 @@ import test from 'node:test';
 import assert from 'node:assert/strict';
 import { sourceDefinition, createDataSource, getDataSource, listDataSources } from '../src/data-sources.js';
 import { beginSourceOAuth, completeSourceOAuth } from '../src/source-oauth.js';
+import { resolveDataSourceCredential } from '../src/authorization-manager.js';
+import { readGa4History } from '../src/collection/ga4.js';
 import { readProviderGrant } from '../src/collection/provider-credentials.js';
 
 function fixture() {
@@ -10,13 +12,13 @@ function fixture() {
     async run(){
       if(sql.includes('INSERT INTO data_sources')) {
         const [id,owner,type,provider,externalResourceId,displayName]=args;
-        if(!sources.some(s=>s.ownerUserId===owner&&s.sourceType===type&&s.externalResourceId===externalResourceId))
-          sources.push({sourceId:id,ownerUserId:owner,sourceType:type,provider,
+        if(!sources.some(s=>s.googleSub===owner&&s.sourceType===type&&s.externalResourceId===externalResourceId))
+          sources.push({sourceId:id,googleSub:owner,sourceType:type,provider,
             externalResourceId,displayName,authStatus:'disconnected',enabled:1});
         return {meta:{changes:1}};
       }
       if(sql.includes('INSERT INTO source_oauth_states')) {
-        pending.set(args[0],{ownerUserId:args[1],sourceId:args[2],expiresAt:args[3],consumed:0});
+        pending.set(args[0],{googleSub:args[1],sourceId:args[2],expiresAt:args[3],consumed:0});
         return {meta:{changes:1}};
       }
       if(sql.includes('UPDATE source_oauth_states')) {
@@ -25,27 +27,29 @@ function fixture() {
         row.consumed=1;return{meta:{changes:1}};
       }
       if(sql.includes('UPDATE data_sources')) {
-        const row=sources.find(s=>s.ownerUserId===args[1]&&s.sourceId===args[2]);
+        const row=sources.find(s=>s.googleSub===args[1]&&s.sourceId===args[2]);
         if(row)row.authStatus=args[0];return{meta:{changes:row?1:0}};
       }
       if(sql.includes('INSERT INTO data_source_authorizations')) {
-        grants.set(args[0],{ownerUserId:args[1],status:'connected',authKind:args[3],grantedScopes:args[5]});
+        grants.set(args[0],{googleSub:args[1],status:'connected',authKind:args[3],grantedScopes:args[5]});
         return{meta:{changes:1}};
       }
       throw Error('Unexpected SQL run: '+sql);
     },
     async first(){
       if(sql.includes('FROM data_sources')) {
-        const row=sources.find(s=>s.ownerUserId===args[0]&&
-          (sql.includes('WHERE owner_user_id=? AND source_id=?')?s.sourceId===args[1]:
+        const row=sources.find(s=>s.googleSub===args[0]&&
+          (sql.includes('WHERE google_sub=? AND source_id=?')?s.sourceId===args[1]:
             s.sourceType===args[1]&&s.externalResourceId===args[2]));
         return row??null;
       }
       if(sql.includes('FROM source_oauth_states'))return pending.get(args[0])??null;
-      if(sql.includes('FROM data_source_authorizations'))return grants.get(args[1])??null;
+      if(sql.includes('FROM data_source_authorizations')){
+        const grant=grants.get(args[1]);return grant?.googleSub===args[0]?grant:null;
+      }
       throw Error('Unexpected SQL first: '+sql);
     },
-    async all(){if(sql.includes('FROM data_sources'))return{results:sources.filter(s=>s.ownerUserId===args[0])};throw Error(sql);}
+    async all(){if(sql.includes('FROM data_sources'))return{results:sources.filter(s=>s.googleSub===args[0])};throw Error(sql);}
   };}};}};
   const env={MCP_DB:db,GOOGLE_CLIENT_ID:'client',GOOGLE_CLIENT_SECRET:'secret',
     MCP_RESOURCE:'https://example.com/mcp',
@@ -60,21 +64,26 @@ function fixture() {
 
 test('owner and source are separate from provider identity and collector',async()=>{
   const {env}=fixture();
-  const a=await createDataSource(env.MCP_DB,{ownerUserId:'user-a',sourceType:'ga4',
+  const a=await createDataSource(env.MCP_DB,{googleSub:'user-a',sourceType:'ga4',
     externalResourceId:'551943445',displayName:'CWS GA4'});
-  const b=await createDataSource(env.MCP_DB,{ownerUserId:'user-b',sourceType:'ga4',
+  const b=await createDataSource(env.MCP_DB,{googleSub:'user-b',sourceType:'ga4',
     externalResourceId:'551943445',displayName:'CWS GA4'});
   assert.notEqual(a.sourceId,b.sourceId);
   assert.equal(sourceDefinition('ga4').provider,'google');
   assert.equal((await listDataSources(env.MCP_DB,'user-a')).length,1);
   await assert.rejects(getDataSource(env.MCP_DB,'user-a',b.sourceId),/not found/);
+  await assert.rejects(readGa4History(env.MCP_DB,{googleSub:'user-a',sourceId:b.sourceId,
+    dateFrom:'2026-11-01',dateTo:'2026-11-02'}),/not found/);
+  await assert.rejects(resolveDataSourceCredential({env,googleSub:'user-a',sourceId:b.sourceId}),/not found/);
+  await assert.rejects(beginSourceOAuth({env,googleSub:'user-a',sourceId:b.sourceId,
+    baseUrl:'https://example.com/mcp'}),/not found/);
 });
 
 test('OAuth state is source-specific, PKCE-protected and one-time',async()=>{
   const {env}=fixture();
-  const source=await createDataSource(env.MCP_DB,{ownerUserId:'user-a',
+  const source=await createDataSource(env.MCP_DB,{googleSub:'user-a',
     sourceType:'ga4',externalResourceId:'551943445',displayName:'GA4'});
-  const start=await beginSourceOAuth({env,ownerUserId:'user-a',
+  const start=await beginSourceOAuth({env,googleSub:'user-a',
     sourceId:source.sourceId,baseUrl:'https://example.com/mcp'});
   const authorize=new URL(start.authorizationUrl);
   assert.equal(authorize.searchParams.get('redirect_uri'),'https://example.com/source-oauth/callback');
@@ -103,9 +112,9 @@ test('OAuth state is source-specific, PKCE-protected and one-time',async()=>{
 
 test('OAuth denies missing scopes without storing token',async()=>{
   const {env}=fixture();
-  const source=await createDataSource(env.MCP_DB,{ownerUserId:'user-a',sourceType:'ga4',
+  const source=await createDataSource(env.MCP_DB,{googleSub:'user-a',sourceType:'ga4',
     externalResourceId:'551943445',displayName:'GA4'});
-  const start=await beginSourceOAuth({env,ownerUserId:'user-a',
+  const start=await beginSourceOAuth({env,googleSub:'user-a',
     sourceId:source.sourceId,baseUrl:'https://example.com/mcp'});
   const state=new URL(start.authorizationUrl).searchParams.get('state');
   const callback=new Request('https://example.com/source-oauth/callback?state='+state+'&code=sample');

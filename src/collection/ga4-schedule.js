@@ -14,13 +14,13 @@ export function dueGa4Range(scheduledTime) {
   };
   return {dateFrom:day(-7),dateTo:day(-1)};
 }
-export async function setGa4DailyCollection(db,{ownerUserId,sourceId,enabled}) {
+export async function setGa4DailyCollection(db,{googleSub,sourceId,enabled}) {
   const {getDataSource,configureSourceCollector}=await import('../data-sources.js');
-  const source=await getDataSource(db,ownerUserId,sourceId);
+  const source=await getDataSource(db,googleSub,sourceId);
   if(source.sourceType!=='ga4')throw new Error('This source is not a GA4 property.');
   if(enabled&&source.authStatus!=='connected')
     throw new Error('Authorize this GA4 data source before enabling collection.');
-  await configureSourceCollector(db,{ownerUserId,sourceId,collectorId:'ga4-analytics',enabled});
+  await configureSourceCollector(db,{googleSub,sourceId,collectorId:'ga4-analytics',enabled});
   return {sourceId,enabled};
 }
 async function claim(db,sourceId,dateFrom,dateTo) {
@@ -35,7 +35,7 @@ export async function collectScheduledGa4(env,scheduledTime) {
   const range=dueGa4Range(scheduledTime);
   if(!range)return {skipped:true,reason:'GA4 collector is not due'};
   const {results}=await env.MCP_DB.prepare(`SELECT ds.source_id AS sourceId,
-    ds.owner_user_id AS ownerUserId FROM data_sources ds
+    ds.google_sub AS googleSub FROM data_sources ds
     INNER JOIN data_source_collectors c ON c.source_id=ds.source_id
     AND c.collector_id='ga4-analytics' AND c.enabled=1
     WHERE ds.source_type='ga4' AND ds.enabled=1 AND ds.auth_status='connected'
@@ -45,7 +45,7 @@ export async function collectScheduledGa4(env,scheduledTime) {
     const runId=await claim(env.MCP_DB,source.sourceId,range.dateFrom,range.dateTo);
     if(!runId){runs.push({sourceId:source.sourceId,skipped:true});continue;}
     try {
-      const outcome=await collectGa4Source({env,ownerUserId:source.ownerUserId,
+      const outcome=await collectGa4Source({env,googleSub:source.googleSub,
         sourceId:source.sourceId,...range});
       await env.MCP_DB.prepare(`UPDATE source_collector_runs
         SET status='succeeded',rows_written=?,finished_at=CURRENT_TIMESTAMP

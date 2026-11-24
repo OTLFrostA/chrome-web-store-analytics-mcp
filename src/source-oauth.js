@@ -17,14 +17,14 @@ async function challenge(verifier) {
 function redirectUri(requestUrl) {
   return new URL('/source-oauth/callback',requestUrl).href;
 }
-export async function beginSourceOAuth({env,ownerUserId,sourceId,baseUrl}) {
-  const source=await getDataSource(env.MCP_DB,ownerUserId,sourceId);
+export async function beginSourceOAuth({env,googleSub,sourceId,baseUrl}) {
+  const source=await getDataSource(env.MCP_DB,googleSub,sourceId);
   const definition=sourceDefinition(source.sourceType);
   if(source.provider!=='google'||definition.authKind!=='oauth')
     throw new Error('Source does not support Google OAuth.');
   const state=randomString(),verifier=randomString();
-  await env.MCP_DB.prepare(`INSERT INTO source_oauth_states(state,owner_user_id,source_id,expires_at)
-    VALUES(?,?,?,?)`).bind(state,ownerUserId,sourceId,
+  await env.MCP_DB.prepare(`INSERT INTO source_oauth_states(state,google_sub,source_id,expires_at)
+    VALUES(?,?,?,?)`).bind(state,googleSub,sourceId,
       Math.floor(Date.now()/1000)+TTL_SECONDS).run();
   try {
     await env.OAUTH_KV.put(PREFIX+state,JSON.stringify({verifier}),{expirationTtl:TTL_SECONDS});
@@ -42,7 +42,7 @@ export async function beginSourceOAuth({env,ownerUserId,sourceId,baseUrl}) {
   url.searchParams.set('prompt','consent');
   url.searchParams.set('code_challenge_method','S256');
   url.searchParams.set('code_challenge',await challenge(verifier));
-  if(source.authStatus!=='connected')await setDataSourceAuthStatus(env.MCP_DB,ownerUserId,sourceId,'pending');
+  if(source.authStatus!=='connected')await setDataSourceAuthStatus(env.MCP_DB,googleSub,sourceId,'pending');
   return {sourceId,authorizationUrl:url.toString(),expiresIn:TTL_SECONDS};
 }
 export async function completeSourceOAuth(request,env,{requestToken=fetch,requestIdentity=fetch}={}) {
@@ -53,7 +53,7 @@ export async function completeSourceOAuth(request,env,{requestToken=fetch,reques
     WHERE state=? AND consumed=0 AND expires_at>?`)
     .bind(state,Math.floor(Date.now()/1000)).run();
   if((claim.meta?.changes??0)!==1)throw new Error('Authorization state expired or already used.');
-  const row=await env.MCP_DB.prepare(`SELECT owner_user_id AS ownerUserId,source_id AS sourceId
+  const row=await env.MCP_DB.prepare(`SELECT google_sub AS googleSub,source_id AS sourceId
     FROM source_oauth_states WHERE state=?`).bind(state).first();
   const pending=await env.OAUTH_KV.get(PREFIX+state,'json');
   await env.OAUTH_KV.delete(PREFIX+state);
@@ -61,7 +61,7 @@ export async function completeSourceOAuth(request,env,{requestToken=fetch,reques
   if(url.searchParams.has('error'))throw new Error('Provider authorization was denied.');
   const code=url.searchParams.get('code');
   if(!code)throw new Error('Provider authorization code is missing.');
-  const source=await getDataSource(env.MCP_DB,row.ownerUserId,row.sourceId);
+  const source=await getDataSource(env.MCP_DB,row.googleSub,row.sourceId);
   const def=sourceDefinition(source.sourceType);
   if(source.provider!=='google'||def.authKind!=='oauth')throw new Error('Unexpected OAuth provider.');
   const response=await requestToken(GOOGLE_TOKEN_URL,{
@@ -85,6 +85,6 @@ export async function completeSourceOAuth(request,env,{requestToken=fetch,reques
   const identity=await identityResponse.json();
   if(typeof identity.sub!=='string'||!identity.sub||identity.email_verified!==true)
     throw new Error('Google provider account identity is invalid.');
-  return authorizeDataSource({env,ownerUserId:row.ownerUserId,sourceId:row.sourceId,
+  return authorizeDataSource({env,googleSub:row.googleSub,sourceId:row.sourceId,
     token:token.refresh_token,grantedScopes:granted,providerAccountId:identity.sub});
 }

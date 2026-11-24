@@ -1,5 +1,5 @@
-// Domain model: users own data sources; collectors run against sources; authorization belongs to a source.
-// Never treat an MCP session, a Google account or a collector ID as a data source.
+// Ownership is the verified Google login subject; source IDs identify resources only.
+// Downstream provider identity and collector configuration are independent of login.
 export const SOURCE_TYPES = Object.freeze({
   cws: Object.freeze({ provider:'google', authKind:'oauth',
     scopes:Object.freeze(['https://www.googleapis.com/auth/chromewebstore.readonly']) }),
@@ -18,49 +18,51 @@ function nonempty(value,label) {
   if(typeof value!=='string'||!value.trim()||value.length>250)throw new TypeError('Invalid '+label+'.');
   return value.trim();
 }
-export async function createDataSource(db,{ownerUserId,sourceType,externalResourceId,displayName}) {
-  const owner=nonempty(ownerUserId,'owner'),resource=nonempty(externalResourceId,'resource');
+export async function createDataSource(db,{googleSub,sourceType,externalResourceId,displayName}) {
+  const owner=googleSub,resource=nonempty(externalResourceId,'resource');
+  if(typeof owner!=='string'||!owner||owner.length>250||owner.includes(':'))
+    throw new TypeError('Invalid Google account identifier.');
   const definition=sourceDefinition(sourceType);
   const label=nonempty(displayName,'display name');
   const id=crypto.randomUUID();
   await db.prepare(`INSERT INTO data_sources
-    (source_id,owner_user_id,source_type,provider,external_resource_id,display_name)
-    VALUES (?,?,?,?,?,?) ON CONFLICT(owner_user_id,source_type,external_resource_id) DO NOTHING`)
+    (source_id,google_sub,source_type,provider,external_resource_id,display_name)
+    VALUES (?,?,?,?,?,?) ON CONFLICT(google_sub,source_type,external_resource_id) DO NOTHING`)
     .bind(id,owner,sourceType,definition.provider,resource,label).run();
-  const row=await db.prepare(`SELECT source_id AS sourceId,owner_user_id AS ownerUserId,
+  const row=await db.prepare(`SELECT source_id AS sourceId,google_sub AS googleSub,
     source_type AS sourceType,provider,external_resource_id AS externalResourceId,
     display_name AS displayName,auth_status AS authStatus,enabled
-    FROM data_sources WHERE owner_user_id=? AND source_type=? AND external_resource_id=?`)
+    FROM data_sources WHERE google_sub=? AND source_type=? AND external_resource_id=?`)
     .bind(owner,sourceType,resource).first();
   if(!row)throw new Error('Failed to create data source.');
   return row;
 }
-export async function getDataSource(db,ownerUserId,sourceId) {
-  const row=await db.prepare(`SELECT source_id AS sourceId,owner_user_id AS ownerUserId,
+export async function getDataSource(db,googleSub,sourceId) {
+  const row=await db.prepare(`SELECT source_id AS sourceId,google_sub AS googleSub,
     source_type AS sourceType,provider,external_resource_id AS externalResourceId,
     display_name AS displayName,auth_status AS authStatus,enabled
-    FROM data_sources WHERE owner_user_id=? AND source_id=?`).bind(ownerUserId,sourceId).first();
+    FROM data_sources WHERE google_sub=? AND source_id=?`).bind(googleSub,sourceId).first();
   if(!row)throw new Error('Data source not found for this user.');
   return row;
 }
-export async function listDataSources(db,ownerUserId) {
+export async function listDataSources(db,googleSub) {
   const {results}=await db.prepare(`SELECT source_id AS sourceId,source_type AS sourceType,provider,
     external_resource_id AS externalResourceId,display_name AS displayName,
-    auth_status AS authStatus,enabled FROM data_sources WHERE owner_user_id=?
-    ORDER BY created_at,source_id`).bind(ownerUserId).all();
+    auth_status AS authStatus,enabled FROM data_sources WHERE google_sub=?
+    ORDER BY created_at,source_id`).bind(googleSub).all();
   return results??[];
 }
-export async function setDataSourceAuthStatus(db,ownerUserId,sourceId,status) {
+export async function setDataSourceAuthStatus(db,googleSub,sourceId,status) {
   if(!['disconnected','pending','connected','reauthorization_required'].includes(status)) {
     throw new TypeError('Invalid source authorization status.');
   }
   const result=await db.prepare(`UPDATE data_sources SET auth_status=?,
-    updated_at=CURRENT_TIMESTAMP WHERE owner_user_id=? AND source_id=?`)
-    .bind(status,ownerUserId,sourceId).run();
+    updated_at=CURRENT_TIMESTAMP WHERE google_sub=? AND source_id=?`)
+    .bind(status,googleSub,sourceId).run();
   if((result.meta?.changes??0)!==1)throw new Error('Data source not found for this user.');
 }
-export async function configureSourceCollector(db,{ownerUserId,sourceId,collectorId,enabled}) {
-  await getDataSource(db,ownerUserId,sourceId);
+export async function configureSourceCollector(db,{googleSub,sourceId,collectorId,enabled}) {
+  await getDataSource(db,googleSub,sourceId);
   if(typeof collectorId!=='string'||!collectorId||typeof enabled!=='boolean')
     throw new TypeError('Invalid collector configuration.');
   await db.prepare(`INSERT INTO data_source_collectors(source_id,collector_id,enabled)
