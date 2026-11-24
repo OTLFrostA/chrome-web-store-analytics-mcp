@@ -25,6 +25,9 @@ it is not a permission added to the MCP login or Chrome Web Store OAuth token.
    fetches daily totals, install event counts and session source/medium.
    Successful reads replace the corresponding **reported days** in D1.
    Dates not returned by Google remain absent rather than becoming zero.
+   A valid empty report writes zero rows and preserves existing history; missing
+   install-event rows remain null. Inserts are split by D1's 100 bound-parameter
+   limit while the replacement remains one transactional batch.
 5. Use `get_ga4_history` for source-bound history without contacting Google.
 6. `set_ga4_daily_collection({sourceId,enabled:true})` opts into 9 AM
    America/Los_Angeles collection of the past seven full dates. Turning it
